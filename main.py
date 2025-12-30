@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MDB2SQL - Interface Principal
+MDB2SQL - Interface Dev Test
 
-Script principal para executar a interface web Flask de conversão e busca MDB2SQL.
+Script para testar a versão de desenvolvimento da interface Flask com melhorias.
 Ultima modificacao: 2025-12-29T14:30:00
 """
 
@@ -62,14 +62,13 @@ def configurar_logging():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MDB2SQL - Interface Web Flask",
+        description="MDB2SQL - Interface Dev Test",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemplos de uso:
-  python main.py                    # Executar com configuracoes padrao
-  python main.py --debug            # Modo desenvolvimento
-  python main.py --port 8080        # Usar porta diferente
-  python main.py --host 0.0.0.0     # Acessivel de qualquer IP
+  python main_dev.py                    # Executar versao dev na porta 5001
+  python main_dev.py --port 5002        # Usar porta diferente
+  python main_dev.py --debug            # Modo debug completo
         """,
     )
 
@@ -79,9 +78,11 @@ Exemplos de uso:
         help="Host para rodar o servidor (padrao: 127.0.0.1)",
     )
     parser.add_argument(
-        "--port", type=int, default=5000, help="Porta do servidor (padrao: 5000)"
+        "--port", type=int, default=5001, help="Porta do servidor dev (padrao: 5001)"
     )
-    parser.add_argument("--debug", action="store_true", help="Ativar modo debug")
+    parser.add_argument(
+        "--debug", action="store_true", help="Ativar modo debug completo"
+    )
     parser.add_argument(
         "--upload-folder", help="Pasta para uploads (padrao: interface/uploads)"
     )
@@ -106,7 +107,7 @@ Exemplos de uso:
     # Validar configuracao
     erros = validar_configuracao(args)
     if erros:
-        print(f"{timestamp_exec} - MDB2SQL - Interface Principal")
+        print(f"{timestamp_exec} - MDB2SQL - Interface Dev Test")
         print("Erros de configuracao:")
         for erro in erros:
             print(f"  - {erro}")
@@ -114,7 +115,7 @@ Exemplos de uso:
 
     # Verificar se a porta está disponivel
     if not verificar_porta_disponivel(args.host, args.port):
-        print(f"{timestamp_exec} - MDB2SQL - Interface Principal")
+        print(f"{timestamp_exec} - MDB2SQL - Interface Dev Test")
         print(f"Erro: Porta {args.port} ja esta em uso no host {args.host}")
         sys.exit(1)
 
@@ -139,7 +140,7 @@ Exemplos de uso:
     try:
         from interface.app_flask_local_search import app
 
-        print(f"{timestamp_exec} - MDB2SQL - Interface Principal")
+        print(f"{timestamp_exec} - MDB2SQL - Interface Dev Test")
         print(f"Iniciando servidor Flask")
         print(f"Pasta de uploads: {args.upload_folder or 'interface/uploads'}")
         print(f"Servidor: http://{args.host}:{args.port}")
@@ -160,23 +161,23 @@ Exemplos de uso:
         )
 
     except ImportError as e:
-        print(f"{timestamp_exec} - MDB2SQL - Interface Principal")
+        print(f"{timestamp_exec} - MDB2SQL - Interface Dev Test")
         print(f"Erro ao importar o modulo Flask: {e}")
         print("Verifique se as dependencias estao instaladas:")
         print("   pip install -r requirements.txt")
         sys.exit(1)
     except KeyboardInterrupt:
-        print(f"\n{timestamp_exec} - MDB2SQL - Interface Principal")
+        print(f"\n{timestamp_exec} - MDB2SQL - Interface Dev Test")
         print("Servidor interrompido pelo usuario")
         sys.exit(0)
     except OSError as e:
-        print(f"{timestamp_exec} - MDB2SQL - Interface Principal")
+        print(f"{timestamp_exec} - MDB2SQL - Interface Dev Test")
         print(f"Erro de sistema operacional: {e}")
         if "Address already in use" in str(e):
             print("A porta ja esta em uso por outro processo")
         sys.exit(1)
     except Exception as e:
-        print(f"{timestamp_exec} - MDB2SQL - Interface Principal")
+        print(f"{timestamp_exec} - MDB2SQL - Interface Dev Test")
         print(f"Erro ao iniciar o servidor: {e}")
         sys.exit(1)
 
