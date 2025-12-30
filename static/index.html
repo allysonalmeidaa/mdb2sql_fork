@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Busca DuckDB — Painel</title>
+  <title>Busca DuckDB - Painel</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root { --bg:#f6f7fb; --card:#fff; --muted:#666; --primary:#0b63d6; --accent:#ffcc00; }
@@ -13,6 +13,8 @@
     .badge{ font-size:13px; color:var(--muted); }
     .btn{ background:var(--primary); color:#fff; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; }
     .btn.ghost{ background:transparent; color:var(--primary); border:1px solid #d7e3ff; }
+    .btn.attention{ animation:pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse{ 0%{ box-shadow:0 0 0 0 rgba(255,204,0,0.5); } 70%{ box-shadow:0 0 0 8px rgba(255,204,0,0); } 100%{ box-shadow:0 0 0 0 rgba(255,204,0,0); } }
     .container{ display:flex; gap:16px; padding:14px; }
     aside{ width:260px; background:var(--card); border-radius:8px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,0.03); height:calc(100vh - 96px); overflow:auto; }
     main{ flex:1; min-width:0; }
@@ -21,6 +23,7 @@
     .card{ background:var(--card); padding:10px; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,0.03); margin-bottom:12px; }
     .small{ font-size:13px; color:var(--muted); }
     .muted{ color:var(--muted); font-size:12px; }
+    .flow-hint{ background:#eef7ff; border:1px solid #cfe0ff; color:#223; padding:8px 10px; border-radius:6px; margin-bottom:10px; }
     ul.table-list{ list-style:none; padding:0; margin:0; }
     li.table-item{ padding:8px; border-bottom:1px solid #eef2f6; display:flex; justify-content:space-between; align-items:center; }
     .config-modal, .overlay{ display:none; }
@@ -31,15 +34,35 @@
     table.results{ width:100%; border-collapse:collapse; margin-top:8px; font-size:13px; }
     table.results th, table.results td{ border:1px solid #eef2f6; padding:8px; text-align:left; vertical-align:top; }
     mark{ background:var(--accent); padding:0 2px; border-radius:2px; }
+    .tabs{ display:flex; gap:6px; margin:8px 0 10px 0; }
+    .tab-btn{ background:#f4f7ff; color:#223; border:1px solid #cfe0ff; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:12px; }
+    .tab-btn.active{ background:#0a55b5; color:#fff; border-color:#0a55b5; }
+    .flow-panel{ display:none; background:#f8fafc; border:1px solid #eef2f6; padding:8px 10px; border-radius:6px; margin-bottom:8px; }
+    body.flow-duckdb #flowDuckdb{ display:block; }
+    body.flow-access #flowAccess{ display:block; }
+    body.flow-duckdb .flow-access-only{ display:none; }
+    body.flow-access .flow-duckdb-only{ display:none; }
+    .upload-row{ display:flex; justify-content:space-between; align-items:center; padding:6px 0; }
+    .upload-row.selected{ background:#eef7ff; border-left:3px solid #0b63d6; padding-left:8px; }
+    .selected-badge{ background:#e6f4ff; color:#0b63d6; border-radius:999px; padding:2px 6px; font-size:11px; }
+    body.needs-selection .select-btn{ border-color:#ffcc00; box-shadow:0 0 0 1px #ffcc00 inset; }
+    .select-btn.selected{ background:#0b63d6; color:#fff; border-color:#0b63d6; }
+    .modal-header{ display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; background:var(--card); padding:6px 0 10px; margin-bottom:8px; border-bottom:1px solid #eef2f6; z-index:2; }
+    .modal-header h3{ margin:0; }
+    .btn.small{ padding:4px 8px; font-size:12px; }
+    .flow-status{ background:#f0f3f8; border:1px solid #dfe6f0; padding:6px 8px; border-radius:6px; margin-bottom:8px; }
+    details.advanced{ margin-top:8px; }
+    details.advanced > summary{ cursor:pointer; font-weight:600; color:#223; }
+    .advanced-body{ margin-top:8px; }
   </style>
 </head>
 <body>
   <header>
-    <h1>Busca DuckDB — Painel</h1>
+    <h1>Busca DuckDB - Painel</h1>
     <div class="small">Ferramenta local para buscas tolerantes (fuzzy)</div>
     <div class="top-right">
       <div id="currentDb" class="badge">DB: carregando...</div>
-      <div id="modeBadge" class="badge">Modo: —</div>
+      <div id="modeBadge" class="badge">Modo: -</div>
       <div id="indexStatus" class="badge">Status: --</div>
       <button id="openConfig" class="btn">Configurar / Upload</button>
       <button id="refreshBtn" class="btn ghost">Atualizar</button>
@@ -54,44 +77,59 @@
       </div>
       <input id="filterTables" placeholder="Filtrar tabelas..." style="width:100%; margin-bottom:8px;" />
       <ul id="tableList" class="table-list"></ul>
-      <div style="margin-top:10px" class="small">Clique em uma tabela para abri-la na visualização completa.</div>
+      <div style="margin-top:10px" class="small">Clique em uma tabela para abri-la na visualizacao completa.</div>
     </aside>
 
     <main>
       <div class="card">
+        <div id="flowHint" class="flow-hint" style="display:none"></div>
         <div class="search-row">
-          <input id="q" type="text" placeholder="Digite termo (ex: energia solar) — Enter para pesquisar" style="flex:1" />
+          <input id="q" type="text" placeholder="Digite termo (ex: svp) - Enter para pesquisar" style="flex:1" />
           <button id="searchBtn" class="btn">Pesquisar</button>
-          <button id="exportAllBtn" class="btn" style="background:#2f9e44;">Exportar resultados CSV</button>
+          <button id="exportAllBtn" class="btn" style="background:#2f9e44;" disabled>Exportar resultados CSV</button>
         </div>
 
-        <div class="controls small">
-          <label>por tabela:
-            <input id="per_table" type="number" value="10" style="width:80px" />
-          </label>
-          <label>candidatos SQL:
-            <input id="candidate_limit" type="number" value="1000" style="width:110px" />
-          </label>
-          <label>total_max:
-            <input id="total_limit" type="number" value="500" style="width:80px" />
-          </label>
-          <label>modo tokens:
-            <select id="token_mode"><option value="any">qualquer</option><option value="all">todas</option></select>
-          </label>
-          <label style="display:flex;align-items:center;gap:4px;">
-            <span>tabelas (filtro):</span>
-            <select id="tablesFilter" multiple size="3" style="min-width:160px;max-width:220px;"></select>
-            <button type="button" id="clearTablesFilter" class="btn ghost" style="padding:4px 8px;font-size:11px;">Limpar</button>
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;">
-            min_score:
-            <input id="min_score" type="range" min="40" max="100" value="70" />
-            <span id="minScoreVal" class="small">70</span>
-          </label>
-        </div>
+        <details id="advancedPanel" class="advanced">
+          <summary>Opcoes avancadas</summary>
+          <div class="advanced-body">
+            <div class="controls small">
+              <label title="Maximo de resultados por tabela">
+                por tabela:
+                <input id="per_table" type="number" value="10" style="width:80px" />
+              </label>
+              <label title="Total de candidatos lidos do _fulltext">
+                candidatos SQL:
+                <input id="candidate_limit" type="number" value="1000" style="width:110px" />
+              </label>
+              <label title="Total maximo de linhas retornadas">
+                total_max:
+                <input id="total_limit" type="number" value="500" style="width:80px" />
+              </label>
+              <label title="Qualquer token ou todos os tokens">
+                modo tokens:
+                <select id="token_mode"><option value="any">qualquer</option><option value="all">todas</option></select>
+              </label>
+              <label style="display:flex;align-items:center;gap:4px;" title="Restringe a busca para tabelas escolhidas">
+                <span>tabelas (filtro opcional):</span>
+                <select id="tablesFilter" multiple size="3" style="min-width:160px;max-width:220px;"></select>
+                <button type="button" id="clearTablesFilter" class="btn ghost small">Limpar</button>
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;" title="Pontuacao minima para exibir resultados">
+                min_score:
+                <input id="min_score" type="range" min="40" max="100" value="70" />
+                <span id="minScoreVal" class="small">70</span>
+              </label>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+              <button id="resetAdvanced" class="btn ghost small" type="button" title="Restaurar valores padrao">Restaurar padrao</button>
+              <div id="advancedMsg" class="muted"></div>
+            </div>
+          </div>
+        </details>
 
-        <div id="searchMeta" class="muted">Digite um termo e clique em Pesquisar.</div>
-      </div>
+      <div id="searchMeta" class="muted">Digite um termo e clique em Pesquisar.</div>
+      <div id="uiLog" class="muted" style="margin-top:6px;white-space:pre-wrap"></div>
+    </div>
 
       <div id="resultsArea"></div>
     </main>
@@ -99,20 +137,38 @@
 
   <div class="overlay" id="overlay"></div>
   <div class="config-modal" id="configModal" role="dialog" aria-modal="true" aria-hidden="true">
-    <h3>Configuração e Upload</h3>
+    <div class="modal-header">
+      <h3>Configuracao e Upload</h3>
+      <button id="closeConfig" class="btn ghost small" title="Fechar">Fechar</button>
+    </div>
     <div style="margin-bottom:8px">DB atual: <span id="cfgCurrentDb" class="muted">carregando...</span></div>
 
+    <div class="tabs" id="flowTabs">
+      <button class="tab-btn active" data-flow="duckdb">DuckDB (rapido)</button>
+      <button class="tab-btn" data-flow="access">Access (conversao)</button>
+    </div>
+    <div id="flowDuckdb" class="flow-panel">
+      <div class="small"><strong>Fluxo 1:</strong> selecione ou envie um .duckdb. Nao ha conversao.</div>
+    </div>
+    <div id="flowAccess" class="flow-panel">
+      <div class="small"><strong>Fluxo 2:</strong> envie .mdb/.accdb, aguarde conversao e depois faca a indexacao.</div>
+    </div>
+
+    <div style="font-weight:600;margin-top:4px">1) Selecionar DB</div>
+    <div class="small" style="margin:4px 0 6px 0">Envie um arquivo ou selecione um dos arquivos ja enviados.</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <input id="fileInput" type="file" accept=".duckdb,.mdb,.accdb" />
-      <button id="uploadBtn" class="btn">Enviar</button>
+      <input id="fileInput" type="file" accept=".duckdb,.mdb,.accdb" title="Aceita .duckdb, .mdb, .accdb" />
+      <button id="uploadBtn" class="btn" title="Enviar arquivo para o servidor">Enviar</button>
       <div id="uploadMsg" class="muted" style="margin-left:12px"></div>
     </div>
 
-    <div style="margin-top:8px"><strong>Ou selecione um DB já enviado:</strong></div>
+    <div style="margin-top:8px"><strong>Ou selecione um DB ja enviado:</strong></div>
     <div id="uploadsList" class="muted" style="margin-top:8px"></div>
 
     <hr/>
 
+    <div style="font-weight:600;margin-top:4px">2) Priorizar tabelas (opcional)</div>
+    <div class="small" style="margin:4px 0 6px 0">Define ordem de busca e prioriza tabelas no ranking.</div>
     <div style="display:flex;gap:12px">
       <div style="flex:1">
         <div style="font-weight:600;margin-bottom:6px">Todas as tabelas</div>
@@ -120,7 +176,7 @@
       </div>
       <div style="flex:1">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <div style="font-weight:600">Tabelas prioritárias (selecionadas)</div>
+          <div style="font-weight:600">Tabelas prioritarias (selecionadas)</div>
           <div class="small">Arraste para reordenar</div>
         </div>
         <ul id="priorityListModal" style="border:1px solid #eef2f6;padding:8px;max-height:220px;overflow:auto"></ul>
@@ -128,26 +184,33 @@
     </div>
 
     <div style="margin-top:8px;display:flex;gap:8px">
-      <button id="savePriorityBtnModal" class="btn">Salvar prioridade</button>
-      <button id="refreshPriorityBtnModal" class="btn ghost">Atualizar</button>
+      <button id="savePriorityBtnModal" class="btn" title="Salvar ordem das tabelas prioritarias">Salvar prioridade</button>
+      <button id="refreshPriorityBtnModal" class="btn ghost" title="Recarregar lista de tabelas">Atualizar</button>
       <div id="priorityMsg" class="muted" style="margin-left:8px"></div>
     </div>
 
     <hr/>
-    <div><strong>Conversão (progresso)</strong>
+    <div class="flow-access-only"><strong>Conversao (progresso)</strong>
       <div class="progress-wrapper">
-        <div style="display:flex;justify-content:space-between"><div id="convStatusText" class="muted">Nenhuma conversão em andamento</div><div id="convPercentText" class="muted">0%</div></div>
+        <div style="display:flex;justify-content:space-between"><div id="convStatusText" class="muted">Nenhuma conversao em andamento</div><div id="convPercentText" class="muted">0%</div></div>
         <div style="margin-top:6px;background:#e9eef8;border-radius:6px;overflow:hidden"><div id="convBar" class="progress-bar" style="width:0%"></div></div>
       </div>
     </div>
 
+    <div class="flow-access-only" style="margin-top:8px">
+      <label class="muted"><input id="autoIndexToggle" type="checkbox" /> Auto indexacao apos conversao (Access)</label>
+      <span id="autoIndexMsg" class="muted" style="margin-left:8px"></span>
+    </div>
+
     <hr/>
-    <div><strong>Iniciar indexação (_fulltext)</strong>
+    <div><strong>3) Indice _fulltext (opcional)</strong>
+      <div class="small" style="margin-top:6px">O _fulltext e um indice interno no DuckDB para busca rapida. Sem ele, a busca fica indisponivel. Recriar apaga e gera de novo.</div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-        <label class="muted">Recriar _fulltext?</label><input id="dropCheckbox" type="checkbox" />
-        <label class="muted">Chunk:</label><input id="chunk" type="number" value="2000" style="width:100px" />
-        <label class="muted">Batch:</label><input id="batch" type="number" value="1000" style="width:100px" />
-        <button id="startIndex" class="btn">Iniciar Indexação</button>
+        <label class="muted" title="Apaga e cria o indice novamente"><input id="dropCheckbox" type="checkbox" /> Recriar _fulltext</label>
+        <label class="muted" title="Tamanho do bloco de leitura">Chunk:</label><input id="chunk" type="number" value="2000" style="width:100px" />
+        <label class="muted" title="Lote de insercao">Batch:</label><input id="batch" type="number" value="1000" style="width:100px" />
+        <button id="resetIndexDefaults" class="btn ghost small" type="button" title="Restaurar valores padrao">Padrao</button>
+        <button id="startIndex" class="btn">Iniciar Indexacao</button>
       </div>
       <div id="indexMsg" class="muted" style="margin-top:8px"></div>
     </div>
@@ -155,43 +218,350 @@
     <hr/>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div id="adminStatus" class="muted">Status: carregando...</div>
-      <button id="closeConfig" class="btn ghost">Fechar</button>
     </div>
   </div>
 
 <script>
 const $ = id => document.getElementById(id);
-let lastResults = null;
+function shortName(pathValue){
+  if(!pathValue) return '';
+  const parts = String(pathValue).split(/[/\\]+/);
+  return parts[parts.length - 1] || String(pathValue);
+}
+  let lastResults = null;
+  let lastQuery = '';
 let currentDb = null;
 let lastStatus = null; // status mais recente vindo de /admin/status
-let priorityTables = []; // lista atual de tabelas prioritárias
+let priorityTables = []; // lista atual de tabelas prioritarias
 let allTables = []; // cache de todas as tabelas conhecidas
+let statusPollTimer = null;
+const STATUS_POLL_ACTIVE_MS = 3000;
+const STATUS_POLL_MODAL_MS = 15000;
+  const STATUS_POLL_IDLE_MS = 45000;
+  const STATUS_POLL_NO_DB_MS = 60000;
+  const LOG_LIMIT = 6;
+  let uiLogEntries = [];
+  let serverOnline = true;
 
-async function apiJSON(path, opts){
-  const r = await fetch(path, opts);
-  return r.json();
+  function logUi(level, msg){
+  const ts = new Date().toISOString().slice(11,19);
+  const line = ts + ' ' + level + ' ' + msg;
+  uiLogEntries.push(line);
+  if(uiLogEntries.length > LOG_LIMIT) uiLogEntries.shift();
+  const el = $('uiLog');
+  if(el) el.textContent = uiLogEntries.join('\n');
+  if(level === 'ERROR') console.error(line);
+  else if(level === 'WARN') console.warn(line);
+  else console.log(line);
+  if(level === 'ERROR' || level === 'WARN'){
+    try{
+      fetch('/client/log',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:level,msg:msg})});
+    }catch(e){}
+  }
+
+  function setServerOnline(isOnline, reason){
+    serverOnline = isOnline;
+    if(!isOnline){
+      if($('indexStatus')) $('indexStatus').textContent = 'Offline';
+      if($('modeBadge')) $('modeBadge').textContent = 'Modo: -';
+      setFlowHint('Servidor offline. Inicie python main.py.', true);
+      if(reason) logUi('ERROR', 'offline ' + reason);
+    }
+  }
+}
+
+window.addEventListener('error', (e)=>{
+  const msg = e && e.message ? e.message : 'js error';
+  logUi('ERROR', 'js ' + msg);
+});
+window.addEventListener('unhandledrejection', (e)=>{
+  const msg = e && e.reason ? e.reason : 'promise error';
+  logUi('ERROR', 'promise ' + msg);
+});
+
+  function hasDbSelected(){
+    return currentDb && currentDb !== 'none';
+  }
+
+  function setFlowHint(text, show){
+    const el = $('flowHint');
+    if(!el) return;
+    if(typeof text === 'string') el.textContent = text;
+    el.style.display = show ? 'block' : 'none';
+  }
+
+  function resetAdvancedDefaults(){
+    if($('per_table')) $('per_table').value = 10;
+    if($('candidate_limit')) $('candidate_limit').value = 1000;
+    if($('total_limit')) $('total_limit').value = 500;
+    if($('token_mode')) $('token_mode').value = 'any';
+    if($('min_score')) $('min_score').value = 70;
+    if($('minScoreVal')) $('minScoreVal').textContent = '70';
+    const sel = $('tablesFilter');
+    if(sel) Array.from(sel.options).forEach(o => o.selected = false);
+  }
+
+  function buildSearchState(){
+    const tablesSel = $('tablesFilter');
+    const selectedTables = tablesSel ? Array.from(tablesSel.selectedOptions).map(o => o.value).filter(Boolean) : [];
+    return {
+      q: $('q') ? $('q').value.trim() : '',
+      per_table: parseInt($('per_table').value) || 10,
+      candidate_limit: parseInt($('candidate_limit').value) || 1000,
+      total_limit: parseInt($('total_limit').value) || 500,
+      token_mode: $('token_mode') ? $('token_mode').value : 'any',
+      min_score: parseInt($('min_score').value) || 70,
+      tables: selectedTables
+    };
+  }
+
+  function applySearchState(state){
+    if(!state) return;
+    if($('q')) $('q').value = state.q || '';
+    if($('per_table')) $('per_table').value = state.per_table || 10;
+    if($('candidate_limit')) $('candidate_limit').value = state.candidate_limit || 1000;
+    if($('total_limit')) $('total_limit').value = state.total_limit || 500;
+    if($('token_mode')) $('token_mode').value = state.token_mode || 'any';
+    if($('min_score')) $('min_score').value = state.min_score || 70;
+    if($('minScoreVal')) $('minScoreVal').textContent = String(state.min_score || 70);
+    const sel = $('tablesFilter');
+    if(sel){
+      const set = new Set(state.tables || []);
+      Array.from(sel.options).forEach(o => o.selected = set.has(o.value));
+    }
+  }
+
+function getStatusPollDelay(){
+  if(!hasDbSelected()) return STATUS_POLL_NO_DB_MS;
+  const active = lastStatus && ((lastStatus.conversion && lastStatus.conversion.running) || lastStatus.indexing);
+  if(active) return STATUS_POLL_ACTIVE_MS;
+  const modalOpen = document.body.classList.contains('modal-open');
+  if(modalOpen) return STATUS_POLL_MODAL_MS;
+  return STATUS_POLL_IDLE_MS;
+}
+
+function scheduleStatusPoll(){
+  if(statusPollTimer) clearTimeout(statusPollTimer);
+  statusPollTimer = setTimeout(async ()=>{
+    await refreshStatus();
+    scheduleStatusPoll();
+  }, getStatusPollDelay());
+}
+
+function forceModalStyles(modal, overlay){
+    if(overlay){
+      overlay.style.display = 'block';
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.background = 'rgba(0,0,0,0.35)';
+      overlay.style.zIndex = '5000';
+    }
+    if(modal){
+      const card = getComputedStyle(document.documentElement).getPropertyValue('--card').trim() || '#fff';
+      modal.setAttribute('aria-hidden', 'false');
+      modal.style.display = 'block';
+      modal.style.visibility = 'visible';
+      modal.style.position = 'fixed';
+      modal.style.left = '50%';
+      modal.style.top = '50%';
+      modal.style.transform = 'translate(-50%,-50%)';
+      modal.style.width = '960px';
+      modal.style.maxWidth = '95%';
+      modal.style.maxHeight = '90vh';
+      modal.style.overflow = 'auto';
+      modal.style.background = card;
+      modal.style.padding = '16px';
+      modal.style.borderRadius = '8px';
+      modal.style.boxShadow = '0 8px 20px rgba(0,0,0,0.2)';
+      modal.style.zIndex = '6000';
+    }
+  }
+
+  function openModal(){
+    document.body.classList.add('modal-open');
+    const modal = $('configModal');
+    const overlay = $('overlay');
+    forceModalStyles(modal, overlay);
+    const display = modal ? getComputedStyle(modal).display : 'none';
+    logUi('INFO', 'modal open display=' + display);
+    try{
+      fetch('/client/log',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:'info',msg:'modal open display=' + display})});
+    }catch(e){}
+    setTimeout(()=>{
+      const m = $('configModal');
+      if(!m){ logUi('ERROR', 'modal missing'); return; }
+      const d = getComputedStyle(m).display;
+      if(d === 'none'){
+        logUi('ERROR', 'modal not visible');
+        forceModalStyles(m, $('overlay'));
+      }
+      const r = m.getBoundingClientRect();
+      logUi('INFO', 'modal rect ' + Math.round(r.width) + 'x' + Math.round(r.height) + ' top ' + Math.round(r.top) + ' left ' + Math.round(r.left));
+      if(r.width === 0 || r.height === 0){
+        logUi('ERROR', 'modal size zero');
+        forceModalStyles(m, $('overlay'));
+      }
+      try{
+        fetch('/client/log',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:'info',msg:'modal rect ' + Math.round(r.width) + 'x' + Math.round(r.height) + ' top ' + Math.round(r.top) + ' left ' + Math.round(r.left)})});
+      }catch(e){}
+    }, 50);
+  }
+
+  function closeModal(){
+    document.body.classList.remove('modal-open');
+    const modal = $('configModal');
+    const overlay = $('overlay');
+    if(modal){
+      modal.setAttribute('aria-hidden', 'true');
+      modal.style.display = '';
+      modal.style.visibility = '';
+      modal.style.zIndex = '';
+      modal.style.position = '';
+      modal.style.left = '';
+      modal.style.top = '';
+      modal.style.transform = '';
+      modal.style.width = '';
+      modal.style.maxWidth = '';
+      modal.style.maxHeight = '';
+      modal.style.overflow = '';
+      modal.style.background = '';
+      modal.style.padding = '';
+      modal.style.borderRadius = '';
+      modal.style.boxShadow = '';
+    }
+    if(overlay){
+      overlay.style.display = '';
+      overlay.style.zIndex = '';
+      overlay.style.position = '';
+      overlay.style.inset = '';
+      overlay.style.background = '';
+    }
+  logUi('INFO', 'modal close');
+  try{
+    fetch('/client/log',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:'info',msg:'modal close'})});
+  }catch(e){}
+}
+
+function setFlow(flow){
+  document.body.classList.remove('flow-duckdb','flow-access');
+  if(flow === 'access') document.body.classList.add('flow-access');
+  else document.body.classList.add('flow-duckdb');
+  const tabs = document.querySelectorAll('#flowTabs .tab-btn');
+  tabs.forEach(btn => {
+    const active = btn.getAttribute('data-flow') === flow;
+    if(active) btn.classList.add('active'); else btn.classList.remove('active');
+  });
+}
+
+  function setNoDbState(opts){
+    const showHint = !opts || opts.showHint !== false;
+    lastStatus = null;
+    document.body.classList.add('needs-selection');
+    setFlow('duckdb');
+    if($('currentDb')) $('currentDb').textContent = 'DB: none';
+    if($('cfgCurrentDb')) $('cfgCurrentDb').textContent = '(none)';
+    if($('modeBadge')) $('modeBadge').textContent = 'Modo: -';
+    if($('indexStatus')) $('indexStatus').textContent = 'Status: -';
+    if($('adminStatus')) $('adminStatus').innerHTML = 'DB: none';
+    setFlowHint('Selecione um DB em Configurar / Upload.', showHint);
+    const exportBtn = $('exportAllBtn');
+    if(exportBtn) exportBtn.disabled = true;
+    if($('resultsArea')) $('resultsArea').innerHTML = '';
+    if($('searchMeta')) $('searchMeta').textContent = 'Selecione um DB para buscar.';
+  if($('openConfig')) $('openConfig').classList.add('attention');
+  if($('tableList')) $('tableList').innerHTML = '<div class="muted">Nenhum DB selecionado</div>';
+  const tablesFilter = $('tablesFilter');
+  if(tablesFilter) tablesFilter.innerHTML = '';
+  const convText = $('convStatusText');
+  if(convText) convText.textContent = 'Nenhum DB selecionado';
+  const convPercent = $('convPercentText');
+  if(convPercent) convPercent.textContent = '0%';
+  const convBar = $('convBar');
+  if(convBar) convBar.style.width = '0%';
+  scheduleStatusPoll();
+}
+
+  async function apiJSON(path, opts){
+    let r;
+    try{
+      r = await fetch(path, opts);
+    }catch(e){
+      setServerOnline(false, e && e.message ? e.message : 'fetch error');
+      throw e;
+    }
+    if(!serverOnline) setServerOnline(true);
+    let data = null;
+  try{
+    data = await r.json();
+  }catch(e){
+    logUi('ERROR', 'json parse fail ' + path);
+    throw e;
+  }
+  if(!r.ok){
+    const errMsg = (data && data.error) ? data.error : 'http ' + r.status;
+    logUi('ERROR', path + ' ' + errMsg);
+  }
+  return data;
 }
 
 async function refreshUiState(){
   try{
     const uploads = await apiJSON('/admin/list_uploads');
-    currentDb = uploads.current_db || null;
+    currentDb = uploads.current_db || '';
     priorityTables = uploads.priority_tables || [];
-    $('currentDb').textContent = 'DB: ' + (currentDb || 'não definido');
-    $('cfgCurrentDb').textContent = currentDb || '(nenhum)';
+    const hasDb = hasDbSelected();
+    const currentDbName = hasDb ? shortName(currentDb) : '';
+    if($('currentDb')){
+      $('currentDb').textContent = 'DB: ' + (hasDb ? currentDbName : 'none');
+      $('currentDb').title = hasDb ? currentDb : '';
+    }
+    if($('cfgCurrentDb')){
+      $('cfgCurrentDb').textContent = hasDb ? currentDbName : '(none)';
+      $('cfgCurrentDb').title = hasDb ? currentDb : '';
+    }
+    const autoIndexToggle = $('autoIndexToggle');
+    if(autoIndexToggle && typeof uploads.auto_index_after_convert !== 'undefined'){
+      autoIndexToggle.checked = !!uploads.auto_index_after_convert;
+    }
     const ul = uploads.uploads || [];
-    $('uploadsList').innerHTML = ul.map(f => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0"><div style="font-weight:600">${f.name}</div><div style="display:flex;gap:6px"><button class="btn ghost" onclick="selectUpload('${encodeURIComponent(f.name)}')">Selecionar</button><a href="/uploads/${encodeURIComponent(f.name)}" target="_blank" class="muted">Baixar</a><button class="btn ghost" onclick="deleteUpload('${encodeURIComponent(f.name)}')">Excluir</button></div></div>`).join('') || '<div class="muted">Nenhum upload encontrado.</div>';
-  }catch(e){ $('uploadsList').textContent='Erro ao listar uploads'; }
+    $('uploadsList').innerHTML = ul.map(f => {
+      const isSelected = hasDb && currentDbName.toLowerCase() === f.name.toLowerCase();
+      const badge = isSelected ? '<span class="selected-badge">Selecionado</span>' : '';
+      const selectLabel = isSelected ? 'Selecionado' : 'Selecionar';
+      const selectClass = isSelected ? 'btn select-btn selected' : 'btn ghost select-btn';
+      const selectAction = isSelected ? 'disabled' : `onclick="selectUpload('${encodeURIComponent(f.name)}')"`;
+      return `<div class="upload-row${isSelected ? ' selected' : ''}"><div style="font-weight:600">${f.name} ${badge}</div><div style="display:flex;gap:6px"><button class="${selectClass}" ${selectAction} title="Selecionar este DB">${selectLabel}</button><a href="/uploads/${encodeURIComponent(f.name)}" target="_blank" class="muted" title="Baixar arquivo">Baixar</a><button class="btn ghost" onclick="deleteUpload('${encodeURIComponent(f.name)}')" title="Excluir arquivo">Excluir</button></div></div>`;
+    }).join('') || '<div class="muted">Nenhum upload encontrado.</div>';
+  }catch(e){
+    $('uploadsList').textContent='Erro ao listar uploads';
+    logUi('ERROR', 'list uploads falhou');
+  }
+    if(!hasDbSelected()){
+      setNoDbState();
+      return;
+    }
+    document.body.classList.remove('needs-selection');
+    setFlowHint('DB selecionado: ' + shortName(currentDb) + '. Pesquise abaixo.', true);
+    if($('searchMeta')) $('searchMeta').textContent = 'Digite um termo e clique em Pesquisar.';
+  if($('openConfig')) $('openConfig').classList.remove('attention');
+  const dbLower = currentDb.toLowerCase();
+  if(dbLower.endsWith('.mdb') || dbLower.endsWith('.accdb')) setFlow('access');
+  else setFlow('duckdb');
   refreshStatus(); refreshTables();
   loadPriorityModal();
+  scheduleStatusPoll();
 }
 
 async function refreshStatus(){
+  if(!hasDbSelected()){
+    setNoDbState();
+    return;
+  }
   try{
     const s = await apiJSON('/admin/status');
     lastStatus = s;
     $('indexStatus').textContent = s.indexing ? 'Indexando...' : (s.fulltext_count ? 'Pronto' : 'Parado');
-    // 1) Conversão em andamento
+    // 1) Conversao em andamento
     if(s.conversion && s.conversion.running){
       const percent = s.conversion.percent || 0;
       $('convBar').style.width = percent + '%';
@@ -200,67 +570,78 @@ async function refreshStatus(){
       $('modeBadge').textContent = 'Modo: convertendo...';
     } else {
       const db = s.db || '';
-      if(db.toLowerCase().endsWith('.duckdb')) $('modeBadge').textContent = 'Modo: duckdb (rápido)';
+      if(db.toLowerCase().endsWith('.duckdb')) $('modeBadge').textContent = 'Modo: duckdb (rapido)';
       else if(db.toLowerCase().endsWith('.mdb') || db.toLowerCase().endsWith('.accdb')) $('modeBadge').textContent = 'Modo: fallback';
-      else $('modeBadge').textContent = 'Modo: —';
-      // 2) Conversão já terminou, mas indexação ainda em andamento
+      else $('modeBadge').textContent = 'Modo: -';
+      // 2) Conversao ja terminou, mas indexacao ainda em andamento
       if(s.indexing){
-        const baseMsg = (s.conversion && s.conversion.ok) ? (s.conversion.msg || 'Conversão finalizada') : 'Banco carregado';
-        $('convStatusText').textContent = baseMsg + ' — indexando _fulltext...';
+        const baseMsg = (s.conversion && s.conversion.ok) ? (s.conversion.msg || 'Conversao finalizada') : 'Banco carregado';
+        $('convStatusText').textContent = baseMsg + ' - indexando _fulltext...';
         $('convBar').style.width = '100%';
         $('convPercentText').textContent = '100%';
       }
-      // 3) Conversão concluída e índice pronto
+      // 3) Conversao concluida e indice pronto
       else if(s.conversion && s.conversion.ok && s.fulltext_count){
-        const msg = s.conversion.msg || 'Conversão finalizada';
-        $('convStatusText').textContent = msg + ' — indexação concluída';
+        const msg = s.conversion.msg || 'Conversao finalizada';
+        $('convStatusText').textContent = msg + ' - indexacao concluida';
         $('convBar').style.width = '100%';
         $('convPercentText').textContent = '100%';
       }
-      // 4) Conversão concluída mas ainda sem _fulltext (aguardando clicar em "Iniciar Indexação")
+      // 4) Conversao concluida mas ainda sem _fulltext (aguardando clicar em "Iniciar Indexacao")
       else if(s.conversion && s.conversion.ok && !s.fulltext_count){
-        const msg = s.conversion.msg || 'Conversão finalizada';
-        $('convStatusText').textContent = msg + ' — aguarda indexação (_fulltext)';
+        const msg = s.conversion.msg || 'Conversao finalizada';
+        $('convStatusText').textContent = msg + ' - aguarda indexacao (_fulltext)';
         $('convBar').style.width = '100%';
         $('convPercentText').textContent = '100%';
       }
-      // 5) Nenhuma conversão registrada
+      // 5) Nenhuma conversao registrada
       else {
-        $('convStatusText').textContent = s.conversion && s.conversion.msg ? s.conversion.msg : 'Nenhuma conversão em andamento';
+        $('convStatusText').textContent = s.conversion && s.conversion.msg ? s.conversion.msg : 'Nenhuma conversao em andamento';
         $('convBar').style.width = (s.conversion && s.conversion.percent) ? s.conversion.percent + '%' : '0%';
         $('convPercentText').textContent = (s.conversion && s.conversion.percent) ? s.conversion.percent + '%' : '0%';
       }
     }
 
-    // Sincroniza mensagem de upload para não ficar eternamente com status:"converting"
+    // Sincroniza mensagem de upload para nao ficar eternamente com status:"converting"
     const upEl = $('uploadMsg');
     if(upEl && s.conversion && !s.conversion.running && s.conversion.ok){
-      upEl.textContent = 'Upload e conversão concluídos.';
+      upEl.textContent = 'Upload e conversao concluidos.';
     }
     let html = `<div>DB: ${s.db || '(nenhum)'}<br/>_fulltext linhas: ${s.fulltext_count || 0}</div>`;
     if(s.top_tables && s.top_tables.length){
-      html += '<div style="margin-top:8px"><strong>Top tabelas:</strong><ul>' + s.top_tables.map(t=>`<li>${t.table} — ${t.count}</li>`).join('') + '</ul></div>';
+      html += '<div style="margin-top:8px"><strong>Top tabelas:</strong><ul>' + s.top_tables.map(t=>`<li>${t.table} - ${t.count}</li>`).join('') + '</ul></div>';
     }
     $('adminStatus').innerHTML = html;
-  }catch(e){ $('adminStatus').textContent='Erro no status'; }
+  }catch(e){
+    $('adminStatus').textContent='Erro no status';
+    logUi('ERROR', 'status falhou');
+  }
 }
 
 async function refreshTables(){
+  if(!hasDbSelected()){
+    $('tableList').innerHTML = '<div class="muted">Nenhum DB selecionado</div>';
+    return;
+  }
   try{
     const t = await apiJSON('/api/tables');
-    if(t.error){ $('tableList').innerHTML = `<div class="muted">Erro: ${t.error}</div>`; return; }
+      if(t.error){
+        $('tableList').innerHTML = '<div class="muted">Erro: ' + escapeHtml(t.error) + '</div>';
+        logUi('ERROR', 'tabelas ' + t.error);
+        return;
+      }
     const list = t.tables || [];
     allTables = list.slice();
     const filter = $('filterTables').value.toLowerCase();
     const container = $('tableList'); container.innerHTML = '';
-    list.filter(name => name.toLowerCase().includes(filter)).forEach(name => {
-      const li = document.createElement('li'); li.className='table-item';
-      li.innerHTML = `<div>${name}</div><div><button class="btn ghost" onclick="openTable(event,'${encodeURIComponent(name)}')">Abrir</button></div>`;
-      li.onclick = () => openTable(null, encodeURIComponent(name));
-      container.appendChild(li);
-    });
+      list.filter(name => name.toLowerCase().includes(filter)).forEach(name => {
+        const li = document.createElement('li'); li.className='table-item';
+        li.innerHTML = `<div>${name}</div><div><button class="btn ghost" onclick="openTable(null,'${encodeURIComponent(name)}')">Abrir</button></div>`;
+        li.onclick = () => openTable(null, encodeURIComponent(name));
+        container.appendChild(li);
+      });
 
-    // Atualiza select de filtro de tabelas na busca, preservando seleções atuais
+    // Atualiza select de filtro de tabelas na busca, preservando selecoes atuais
     const sel = $('tablesFilter');
     if(sel){
       const previouslySelected = Array.from(sel.selectedOptions).map(o => o.value);
@@ -274,30 +655,85 @@ async function refreshTables(){
         sel.appendChild(opt);
       });
     }
-  }catch(e){ $('tableList').innerHTML = '<div class="muted">Erro ao carregar tabelas</div>'; }
+  }catch(e){
+    $('tableList').innerHTML = '<div class="muted">Erro ao carregar tabelas</div>';
+    logUi('ERROR', 'tabelas falhou');
+  }
 }
 
 /* modal open/close */
-$('openConfig').addEventListener('click', ()=> document.body.classList.add('modal-open'));
-$('closeConfig').addEventListener('click', ()=> document.body.classList.remove('modal-open'));
-$('overlay').addEventListener('click', ()=> document.body.classList.remove('modal-open'));
+$('openConfig').addEventListener('click', ()=>{
+  openModal();
+});
+$('closeConfig').addEventListener('click', ()=> closeModal());
+$('overlay').addEventListener('click', ()=> closeModal());
+['openConfig','closeConfig','overlay'].forEach(id => {
+  const el = $(id);
+  if(el) el.addEventListener('click', ()=> scheduleStatusPoll());
+});
 
 /* upload/select/delete actions */
-$('uploadBtn').addEventListener('click', async ()=>{
-  const fi = $('fileInput'); if(!fi.files.length){ $('uploadMsg').textContent='Selecione um arquivo.'; return; }
-  const f = fi.files[0]; const fd = new FormData(); fd.append('file', f); $('uploadMsg').textContent='Enviando...';
-  try{ const res = await fetch('/admin/upload',{method:'POST', body: fd}); const j = await res.json(); $('uploadMsg').textContent = JSON.stringify(j); await refreshUiState(); } catch(e){ $('uploadMsg').textContent='Erro no upload'; }
-});
-async function selectUpload(nameEnc){ const name = decodeURIComponent(nameEnc); const res = await fetch('/admin/select',{method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({filename: name})}); const j = await res.json(); alert(JSON.stringify(j)); await refreshUiState(); }
+  $('uploadBtn').addEventListener('click', async ()=>{
+    const fi = $('fileInput'); if(!fi.files.length){ $('uploadMsg').textContent='Selecione um arquivo.'; return; }
+    const f = fi.files[0]; const fd = new FormData(); fd.append('file', f); $('uploadMsg').textContent='Enviando...';
+    try{
+      const res = await fetch('/admin/upload',{method:'POST', body: fd});
+      const j = await res.json();
+      const msg = $('uploadMsg');
+      const nameHint = shortName((j && (j.db_path || j.db || j.output || j.input)) || f.name || '');
+      if(j && j.ok){
+        if(j.status === 'converting'){
+          msg.textContent = 'Conversao iniciada: ' + (nameHint || f.name);
+        } else {
+          msg.textContent = 'Upload ok: ' + (nameHint || f.name);
+        }
+      } else if(j && j.error){
+        msg.textContent = 'Erro: ' + j.error;
+      } else {
+        msg.textContent = 'Falha no upload';
+      }
+      await refreshUiState();
+    } catch(e){
+      $('uploadMsg').textContent='Erro no upload';
+      logUi('ERROR', 'upload falhou');
+    }
+  });
 async function deleteUpload(nameEnc){ if(!confirm('Deseja realmente excluir este arquivo?')) return; const name = decodeURIComponent(nameEnc); const res = await fetch('/admin/delete',{method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({filename: name})}); const j = await res.json(); if(j.ok){ alert('Arquivo apagado'); await refreshUiState(); } else alert('Erro: '+(j.error||JSON.stringify(j))); }
+async function selectUpload(nameEnc){
+  const name = decodeURIComponent(nameEnc);
+  const res = await fetch('/admin/select',{method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({filename: name})});
+  const j = await res.json();
+  const msg = $('uploadMsg');
+  if(j && j.ok){
+    if(msg) msg.textContent = 'DB selecionado: ' + name;
+  } else {
+    if(msg) msg.textContent = 'Erro ao selecionar DB';
+    logUi('ERROR', 'select db falhou');
+  }
+  await refreshUiState();
+}
 
 /* priority modal */
 async function loadPriorityModal(){
   const allEl = $('allTablesList'), selEl = $('priorityListModal');
   if(!allEl || !selEl) return;
+  if(!hasDbSelected()){
+    allEl.innerHTML = '<li class="muted">Nenhum DB selecionado</li>';
+    selEl.innerHTML = '';
+    $('priorityMsg').textContent='Nenhum DB selecionado';
+    return;
+  }
   allEl.innerHTML=''; selEl.innerHTML=''; $('priorityMsg').textContent='Carregando...';
   try{
-    const t = await apiJSON('/api/tables'); const tables = t.tables || [];
+    const t = await apiJSON('/api/tables');
+    if(t.error){
+      allEl.innerHTML='<li class="muted">Erro ao listar tabelas</li>';
+      selEl.innerHTML='<li class="muted">Erro ao listar tabelas</li>';
+      $('priorityMsg').textContent='';
+      logUi('ERROR', 'priority tabelas ' + t.error);
+      return;
+    }
+    const tables = t.tables || [];
     const visible = tables.filter(n => !/^MSys/i.test(n));
     const st = await apiJSON('/admin/list_uploads'); const saved = st.priority_tables || [];
     const remaining = visible.filter(x => !saved.includes(x));
@@ -308,55 +744,164 @@ async function loadPriorityModal(){
     });
     saved.forEach(name => {
       const li = document.createElement('li'); li.draggable=true; li.dataset.table=name;
-      li.innerHTML = `<div style="flex:1">${escapeHtml(name)}</div><div style="display:flex;gap:6px"><button class="btn ghost" onclick="prioMoveUp(this)">▲</button><button class="btn ghost" onclick="prioMoveDown(this)">▼</button><button class="btn ghost" onclick="prioRemove(this)">✕</button></div>`;
+      li.innerHTML = `<div style="flex:1">${escapeHtml(name)}</div><div style="display:flex;gap:6px"><button class="btn ghost" onclick="prioMoveUp(this)" title="Mover para cima">Up</button><button class="btn ghost" onclick="prioMoveDown(this)" title="Mover para baixo">Down</button><button class="btn ghost" onclick="prioRemove(this)" title="Remover">X</button></div>`;
       selEl.appendChild(li);
     });
     enableDragAndDrop(selEl); $('priorityMsg').textContent='';
-  }catch(e){ allEl.innerHTML='<li class="muted">Erro ao listar tabelas</li>'; selEl.innerHTML='<li class="muted">Erro ao listar tabelas</li>'; $('priorityMsg').textContent=''; }
+  }catch(e){
+    allEl.innerHTML='<li class="muted">Erro ao listar tabelas</li>';
+    selEl.innerHTML='<li class="muted">Erro ao listar tabelas</li>';
+    $('priorityMsg').textContent='';
+    logUi('ERROR', 'priority modal falhou');
+  }
 }
-function onTableCheckboxChange(chk){ const name = chk.getAttribute('data-name'); if(chk.checked){ const selEl = $('priorityListModal'); const li = document.createElement('li'); li.draggable=true; li.dataset.table=name; li.innerHTML = `<div style="flex:1">${escapeHtml(name)}</div><div style="display:flex;gap:6px"><button class="btn ghost" onclick="prioMoveUp(this)">▲</button><button class="btn ghost" onclick="prioMoveDown(this)">▼</button><button class="btn ghost" onclick="prioRemove(this)">✕</button></div>`; selEl.appendChild(li); enableDragAndDrop(selEl); } else { const selEl = $('priorityListModal'); const it = Array.from(selEl.children).find(li => li.dataset.table === name); if(it) selEl.removeChild(it); } }
+function onTableCheckboxChange(chk){ const name = chk.getAttribute('data-name'); if(chk.checked){ const selEl = $('priorityListModal'); const li = document.createElement('li'); li.draggable=true; li.dataset.table=name; li.innerHTML = `<div style="flex:1">${escapeHtml(name)}</div><div style="display:flex;gap:6px"><button class="btn ghost" onclick="prioMoveUp(this)" title="Mover para cima">Up</button><button class="btn ghost" onclick="prioMoveDown(this)" title="Mover para baixo">Down</button><button class="btn ghost" onclick="prioRemove(this)" title="Remover">X</button></div>`; selEl.appendChild(li); enableDragAndDrop(selEl); } else { const selEl = $('priorityListModal'); const it = Array.from(selEl.children).find(li => li.dataset.table === name); if(it) selEl.removeChild(it); } }
 function enableDragAndDrop(listEl){ let dragSrc=null; Array.from(listEl.children).forEach(li=>{ li.addEventListener('dragstart',(e)=>{ dragSrc=li; li.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; }); li.addEventListener('dragend',()=>{ li.classList.remove('dragging'); }); li.addEventListener('dragover',(e)=>{ e.preventDefault(); const target=e.currentTarget; if(target===dragSrc) return; const rect=target.getBoundingClientRect(); const next=(e.clientY-rect.top)>rect.height/2; if(next){ target.parentNode.insertBefore(dragSrc,target.nextSibling); } else { target.parentNode.insertBefore(dragSrc,target); } }); li.addEventListener('drop',(e)=>{ e.preventDefault(); }); }); }
 function prioMoveUp(btn){ const li=btn.closest('li'); const prev=li.previousElementSibling; if(prev) li.parentNode.insertBefore(li,prev); }
 function prioMoveDown(btn){ const li=btn.closest('li'); const next=li.nextElementSibling; if(next) li.parentNode.insertBefore(li,next.nextElementSibling); }
 function prioRemove(btn){ const li=btn.closest('li'); const name=li.dataset.table; li.parentNode.removeChild(li); const leftChk = Array.from(document.querySelectorAll('#allTablesList input[type=checkbox]')).find(c=>c.getAttribute('data-name')===name); if(leftChk) leftChk.checked=false; }
 
 $('refreshPriorityBtnModal').addEventListener('click', ()=> loadPriorityModal());
-$('savePriorityBtnModal').addEventListener('click', async ()=>{ const listEl=$('priorityListModal'); const tables=Array.from(listEl.querySelectorAll('li')).map(li=>li.dataset.table); const res=await fetch('/admin/set_priority',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tables:tables})}); const j=await res.json(); $('priorityMsg').textContent = JSON.stringify(j); await refreshUiState(); });
+  $('savePriorityBtnModal').addEventListener('click', async ()=>{
+    const listEl = $('priorityListModal');
+    const tables = Array.from(listEl.querySelectorAll('li')).map(li=>li.dataset.table);
+    const res = await fetch('/admin/set_priority',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tables:tables})});
+    const j = await res.json();
+    const msg = $('priorityMsg');
+    if(j && j.ok){
+      if(msg) msg.textContent = 'Prioridades salvas: ' + tables.length;
+    } else if(msg){
+      msg.textContent = 'Erro ao salvar prioridades';
+    }
+    await refreshUiState();
+  });
+
+/* flow tabs */
+const flowTabButtons = document.querySelectorAll('#flowTabs .tab-btn');
+flowTabButtons.forEach(btn => {
+  btn.addEventListener('click', ()=>{
+    const flow = btn.getAttribute('data-flow') || 'duckdb';
+    setFlow(flow);
+  });
+});
+
+/* auto index toggle */
+  const autoIndexToggleEl = $('autoIndexToggle');
+  if(autoIndexToggleEl){
+    autoIndexToggleEl.addEventListener('change', async ()=>{
+      const enabled = autoIndexToggleEl.checked;
+      const res = await fetch('/admin/set_auto_index',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled: enabled})});
+      const j = await res.json();
+      const msg = $('autoIndexMsg');
+      if(j && j.ok){
+        if(msg) msg.textContent = 'Auto indexacao: ' + (j.auto_index_after_convert ? 'on' : 'off');
+      } else {
+        if(msg) msg.textContent = 'Erro ao atualizar auto indexacao';
+      }
+    });
+  }
+
+  const resetIndexDefaultsBtn = $('resetIndexDefaults');
+  if(resetIndexDefaultsBtn){
+    resetIndexDefaultsBtn.addEventListener('click', ()=>{
+      if($('chunk')) $('chunk').value = 2000;
+      if($('batch')) $('batch').value = 1000;
+      if($('dropCheckbox')) $('dropCheckbox').checked = false;
+      const msg = $('indexMsg');
+      if(msg){
+        msg.textContent = 'Valores padrao restaurados.';
+        setTimeout(()=>{ msg.textContent = ''; }, 2000);
+      }
+    });
+  }
+
+  const startIndexBtn = $('startIndex');
+  if(startIndexBtn){
+    startIndexBtn.addEventListener('click', async ()=>{
+      const msg = $('indexMsg');
+      if(!hasDbSelected()){
+        if(msg) msg.textContent = 'Selecione um DB primeiro.';
+        return;
+      }
+      const drop = !!($('dropCheckbox') && $('dropCheckbox').checked);
+      const chunkVal = parseInt($('chunk') ? $('chunk').value : '2000', 10);
+      const batchVal = parseInt($('batch') ? $('batch').value : '1000', 10);
+      const chunk = Number.isFinite(chunkVal) && chunkVal > 0 ? chunkVal : 2000;
+      const batch = Number.isFinite(batchVal) && batchVal > 0 ? batchVal : 1000;
+      if(msg) msg.textContent = 'Iniciando indexacao...';
+      try{
+        const res = await apiJSON('/admin/start_index', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({drop: drop, chunk: chunk, batch: batch})});
+        if(res && res.ok){
+          if(msg) msg.textContent = 'Indexacao iniciada.';
+          await refreshStatus();
+          scheduleStatusPoll();
+        } else if(res && res.error){
+          if(msg) msg.textContent = 'Erro: ' + res.error;
+        } else {
+          if(msg) msg.textContent = 'Falha ao iniciar indexacao';
+        }
+      }catch(e){
+        if(msg) msg.textContent = 'Erro ao iniciar indexacao';
+        logUi('ERROR', 'indexacao falhou');
+      }
+    });
+  }
 
 /* search */
-$('searchBtn').addEventListener('click', doSearch);
-$('q').addEventListener('keydown', (e)=> { if(e.key==='Enter') doSearch(); });
-$('refreshBtn').addEventListener('click', ()=> refreshUiState());
-$('filterTables').addEventListener('input', ()=> refreshTables());
-$('min_score').addEventListener('input', ()=> $('minScoreVal').textContent = $('min_score').value);
-const clearTablesBtn = $('clearTablesFilter');
-if(clearTablesBtn){
-  clearTablesBtn.addEventListener('click', ()=>{
-    const sel = $('tablesFilter');
-    if(!sel) return;
-    Array.from(sel.options).forEach(o => o.selected = false);
-  });
-}
+  $('searchBtn').addEventListener('click', doSearch);
+  $('q').addEventListener('keydown', (e)=> { if(e.key==='Enter') doSearch(); });
+  $('refreshBtn').addEventListener('click', ()=> refreshUiState());
+  $('filterTables').addEventListener('input', ()=> refreshTables());
+  const exportAllBtn = $('exportAllBtn');
+  if(exportAllBtn) exportAllBtn.addEventListener('click', exportResultsCsv);
+  $('min_score').addEventListener('input', ()=> $('minScoreVal').textContent = $('min_score').value);
+  const clearTablesBtn = $('clearTablesFilter');
+  if(clearTablesBtn){
+    clearTablesBtn.addEventListener('click', ()=>{
+      const sel = $('tablesFilter');
+      if(!sel) return;
+      Array.from(sel.options).forEach(o => o.selected = false);
+    });
+  }
+  const resetAdvancedBtn = $('resetAdvanced');
+  if(resetAdvancedBtn){
+    resetAdvancedBtn.addEventListener('click', ()=>{
+      resetAdvancedDefaults();
+      const msg = $('advancedMsg');
+      if(msg){
+        msg.textContent = 'Valores padrao restaurados.';
+        setTimeout(()=>{ msg.textContent = ''; }, 2000);
+      }
+    });
+  }
 
-async function doSearch(){
-  const q = $('q').value.trim();
-  if(!q){ alert('Digite um termo para pesquisar'); return; }
+  async function doSearch(opts){
+    const q = $('q').value.trim();
+    if(!q){ alert('Digite um termo para pesquisar'); return; }
+    if(!hasDbSelected()){
+      setNoDbState({showHint:true});
+      logUi('WARN', 'acao exige DB');
+      alert('Selecione um DB primeiro');
+      return;
+    }
 
-  const btn = $('searchBtn');
-  if(btn.disabled) return; // evita buscas duplicadas
+    const btn = $('searchBtn');
+    if(btn.disabled) return; // evita buscas duplicadas
+  const exportBtn = $('exportAllBtn');
+  if(exportBtn) exportBtn.disabled = true;
 
-  // Bloqueia busca enquanto conversão ou indexação estiverem em andamento
+  // Bloqueia busca enquanto conversao ou indexacao estiverem em andamento
   try{
     if(lastStatus && lastStatus.conversion && lastStatus.conversion.running){
-      alert('Aguarde a conversão do banco terminar antes de pesquisar.');
+      alert('Aguarde a conversao do banco terminar antes de pesquisar.');
       return;
     }
     if(lastStatus && lastStatus.indexing){
-      alert('Aguarde a indexação (_fulltext) terminar antes de pesquisar.');
+      alert('Aguarde a indexacao (_fulltext) terminar antes de pesquisar.');
       return;
     }
     if(lastStatus && lastStatus.db && lastStatus.db.toLowerCase().endsWith('.duckdb') && !lastStatus.fulltext_count){
-      alert('Este banco DuckDB ainda não possui índice _fulltext. Inicie a indexação antes de pesquisar.');
+      alert('Este banco DuckDB ainda nao possui indice _fulltext. Inicie a indexacao antes de pesquisar.');
       return;
     }
   }catch(e){}
@@ -366,16 +911,18 @@ async function doSearch(){
   const total_limit = parseInt($('total_limit').value) || 500;
   const token_mode = $('token_mode').value;
   const min_score = parseInt($('min_score').value) || null;
-  $('searchMeta').textContent = `Buscando: "${q}" ...`;
-  // Monta parâmetro opcional de filtro de tabelas
-  const tablesSel = $('tablesFilter');
-  let tablesParam = '';
-  if(tablesSel){
-    const selectedTables = Array.from(tablesSel.selectedOptions).map(o => o.value).filter(Boolean);
-    if(selectedTables.length){
-      tablesParam = `&tables=${encodeURIComponent(selectedTables.join(','))}`;
+    lastQuery = q;
+    $('searchMeta').textContent = `Buscando: "${q}" ...`;
+  // Monta parametro opcional de filtro de tabelas
+    const tablesSel = $('tablesFilter');
+    let tablesParam = '';
+    let selectedTables = [];
+    if(tablesSel){
+      selectedTables = Array.from(tablesSel.selectedOptions).map(o => o.value).filter(Boolean);
+      if(selectedTables.length){
+        tablesParam = `&tables=${encodeURIComponent(selectedTables.join(','))}`;
+      }
     }
-  }
 
   const url = `/api/search?q=${encodeURIComponent(q)}&per_table=${per_table}&candidate_limit=${candidate_limit}&total_limit=${total_limit}&token_mode=${token_mode}${min_score?('&min_score='+min_score):''}${tablesParam}`;
   btn.disabled = true;
@@ -383,12 +930,22 @@ async function doSearch(){
   try{
     const res = await fetch(url);
     const data = await res.json();
-    if(data.error){ $('searchMeta').textContent = 'Erro: ' + data.error; return; }
+    if(data.error){
+      $('searchMeta').textContent = 'Erro: ' + data.error;
+      logUi('ERROR', 'search ' + data.error);
+      return;
+    }
     lastResults = data;
+    if(!opts || !opts.skipHistory){
+      const state = buildSearchState();
+      try{ history.pushState(state, '', window.location.pathname); }catch(e){}
+    }
     $('searchMeta').textContent = `Resultados: ${data.returned_count} (candidatos: ${data.candidate_count})`;
+    if(exportBtn) exportBtn.disabled = !(data && data.returned_count);
     renderResults(q, data.results || {}, per_table);
   }catch(e){
     $('searchMeta').textContent = 'Erro na busca';
+    logUi('ERROR', 'search falhou');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Pesquisar';
@@ -399,20 +956,26 @@ async function doSearch(){
 function renderResults(q, results, per_table){
   const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
   const root = $('resultsArea'); root.innerHTML = '';
+  const exportBtn = $('exportAllBtn');
+  if(exportBtn) exportBtn.disabled = true;
   let keys = Object.keys(results);
-  // Reordena chaves colocando as tabelas prioritárias primeiro, na ordem salva
+  // Reordena chaves colocando as tabelas prioritarias primeiro, na ordem salva
   if(priorityTables && priorityTables.length){
     const set = new Set(priorityTables);
     const pri = priorityTables.filter(t => keys.includes(t));
     const others = keys.filter(k => !set.has(k));
     keys = pri.concat(others);
   }
-  if(keys.length===0){ root.innerHTML = '<div class="card small">Nenhum resultado encontrado.</div>'; return; }
+  if(keys.length===0){
+    root.innerHTML = '<div class="card small">Nenhum resultado encontrado.</div>';
+    return;
+  }
+  if(exportBtn) exportBtn.disabled = false;
   keys.forEach(tbl => {
     const block = document.createElement('div'); block.className='card';
     const header = document.createElement('div'); header.style.display='flex'; header.style.justifyContent='space-between';
-    header.innerHTML = `<div><span id="tag-${tbl}" style="display:none;background:#eef7ff;color:var(--primary);padding:4px 8px;border-radius:999px;margin-right:8px;font-size:12px">PRIORITÁRIO</span><strong>${tbl}</strong> <span class="muted">(${results[tbl].length})</span></div>
-      <div><button class="btn ghost" onclick="openTable(event,'${encodeURIComponent(tbl)}')">Abrir</button><button class="btn ghost" onclick="exportTableCsv('${encodeURIComponent(tbl)}')">Export CSV</button></div>`;
+      header.innerHTML = `<div><span id="tag-${tbl}" style="display:none;background:#eef7ff;color:var(--primary);padding:4px 8px;border-radius:999px;margin-right:8px;font-size:12px">PRIORITARIO</span><strong>${tbl}</strong> <span class="muted">(${results[tbl].length})</span></div>
+      <div><button class="btn ghost" onclick="openTable(null,'${encodeURIComponent(tbl)}')">Abrir</button><button class="btn ghost" onclick="exportTableCsv('${encodeURIComponent(tbl)}')">Export CSV</button></div>`;
     block.appendChild(header);
     const rows = results[tbl];
     const colsSet = new Set();
@@ -428,7 +991,7 @@ function renderResults(q, results, per_table){
     } else {
       const table = document.createElement('table'); table.className='results';
       const thead = document.createElement('thead');
-      thead.innerHTML = '<tr><th style="width:90px">pontuação</th>' + cols.map(c=>`<th>${escapeHtml(c)}</th>`).join('') + '</tr>';
+      thead.innerHTML = '<tr><th style="width:90px">pontuacao</th>' + cols.map(c=>`<th>${escapeHtml(c)}</th>`).join('') + '</tr>';
       table.appendChild(thead);
       const tbody = document.createElement('tbody');
       rowObjs.slice(0, per_table).forEach(r => {
@@ -454,9 +1017,19 @@ function renderResults(q, results, per_table){
       if(el) el.style.display = 'inline-block';
     });
   }catch(e){}
-}
+  }
 
-/* utilities */
+  function backToResults(){
+    if(lastResults && lastResults.results){
+      const perTable = parseInt($('per_table').value) || 10;
+      $('searchMeta').textContent = `Resultados: ${lastResults.returned_count || 0} (candidatos: ${lastResults.candidate_count || 0})`;
+      renderResults(lastQuery || ($('q') ? $('q').value.trim() : ''), lastResults.results || {}, perTable);
+    } else {
+      refreshUiState();
+    }
+  }
+
+  /* utilities */
 function escapeHtml(s){ return (s+'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function highlightText(text, tokens){
@@ -471,12 +1044,105 @@ function highlightText(text, tokens){
 }
 
 /* table viewer / export */
-async function openTable(ev, tableEnc){ if(ev) ev.stopPropagation(); const table = decodeURIComponent(tableEnc); const limit=100, offset=0; const res = await fetch(`/api/table?name=${encodeURIComponent(table)}&limit=${limit}&offset=${offset}`); const data = await res.json(); if(data.error){ alert('Erro ao abrir tabela: ' + data.error); return; } const area = $('resultsArea'); area.innerHTML = `<div class="card"><h3>Tabela: ${escapeHtml(table)} <span class="muted">linhas: ${data.total}</span></h3></div>`; const hdr = document.createElement('div'); hdr.className='card'; const tableEl = document.createElement('table'); tableEl.className='results'; const thead = document.createElement('thead'); thead.innerHTML = '<tr>' + data.columns.map(c=>`<th>${escapeHtml(c)}</th>`).join('') + '</tr>'; tableEl.appendChild(thead); const tbody = document.createElement('tbody'); data.rows.forEach(row => { const tr = document.createElement('tr'); row.forEach(cell => tr.innerHTML += `<td>${escapeHtml(cell===null?'':String(cell))}</td>`); tbody.appendChild(tr); }); tableEl.appendChild(tbody); hdr.appendChild(tableEl); const pager = document.createElement('div'); pager.className='controls-footer'; pager.innerHTML = `<button class="btn ghost" onclick="refreshUiState()">Voltar</button>`; hdr.appendChild(pager); area.appendChild(hdr); }
+async function openTable(ev, tableEnc){
+  if(ev) ev.stopPropagation();
+  const table = decodeURIComponent(tableEnc);
+  const limit = 100, offset = 0;
+  try{
+    const data = await apiJSON(`/api/table?name=${encodeURIComponent(table)}&limit=${limit}&offset=${offset}`);
+    if(data.error){
+      alert('Erro ao abrir tabela: ' + data.error);
+      return;
+    }
+    const area = $('resultsArea');
+    area.innerHTML = `<div class="card"><h3>Tabela: ${escapeHtml(table)} <span class="muted">linhas: ${data.total}</span></h3></div>`;
+    if(!data.rows || data.rows.length === 0){
+      const empty = document.createElement('div');
+      empty.className = 'card small';
+      empty.textContent = 'Sem linhas para mostrar.';
+      area.appendChild(empty);
+      return;
+    }
+    const hdr = document.createElement('div');
+    hdr.className = 'card';
+    const tableEl = document.createElement('table');
+    tableEl.className = 'results';
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr>' + (data.columns || []).map(c=>`<th>${escapeHtml(c)}</th>`).join('') + '</tr>';
+    tableEl.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    data.rows.forEach(row => {
+      const tr = document.createElement('tr');
+      row.forEach(cell => tr.innerHTML += `<td>${escapeHtml(cell===null?'':String(cell))}</td>`);
+      tbody.appendChild(tr);
+    });
+    tableEl.appendChild(tbody);
+    hdr.appendChild(tableEl);
+    const pager = document.createElement('div');
+    pager.className = 'controls-footer';
+    pager.innerHTML = `<button class="btn ghost" onclick="backToResults()">Voltar</button>`;
+    hdr.appendChild(pager);
+    area.appendChild(hdr);
+  }catch(e){
+    logUi('ERROR', 'abrir tabela falhou');
+    alert('Erro ao abrir tabela');
+  }
+}
 async function exportTableCsv(tableEnc){ const table = decodeURIComponent(tableEnc); const res = await fetch(`/api/table?name=${encodeURIComponent(table)}&limit=1000&offset=0`); const data = await res.json(); if(data.error){ alert('Erro ao exportar: ' + data.error); return; } const cols = data.columns; const rows = data.rows; const esc = v => '"' + String(v).replace(/"/g,'""') + '"'; const header = cols.map(esc).join(',') + '\n'; const body = rows.map(r => r.map(esc).join(',')).join('\n'); const blob = new Blob([header + body], {type:'text/csv;charset=utf-8;'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${table}.csv`; a.click(); URL.revokeObjectURL(url); }
 
-/* startup */
-refreshUiState();
-setInterval(refreshStatus, 3000);
+function exportResultsCsv(){
+  if(!lastResults || !lastResults.results){
+    alert('Sem resultados para exportar');
+    return;
+  }
+  const results = lastResults.results || {};
+  const colsSet = new Set(['table', 'score']);
+  const rowsOut = [];
+  Object.keys(results).forEach(tbl => {
+    (results[tbl] || []).forEach(item => {
+      let rowObj = item && item.row ? item.row : null;
+      if(!rowObj && item && item.row_json){
+        try{ rowObj = JSON.parse(item.row_json || '{}'); }catch(e){ rowObj = {}; }
+      }
+      if(!rowObj || typeof rowObj !== 'object') rowObj = {};
+      Object.keys(rowObj).forEach(k => colsSet.add(k));
+      rowsOut.push({table: tbl, score: item && item.score != null ? item.score : '', row: rowObj});
+    });
+  });
+  const cols = Array.from(colsSet);
+  const esc = v => '"' + String(v).replace(/"/g,'""') + '"';
+  const lines = [cols.map(esc).join(',')];
+  rowsOut.forEach(r => {
+    const line = cols.map(c => {
+      if(c === 'table') return r.table;
+      if(c === 'score') return r.score;
+      const v = r.row && Object.prototype.hasOwnProperty.call(r.row, c) ? r.row[c] : '';
+      return (v && typeof v === 'object') ? JSON.stringify(v) : v;
+    });
+    lines.push(line.map(esc).join(','));
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'resultados.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+  /* startup */
+  setFlowHint('', false);
+  window.addEventListener('popstate', (e)=>{
+    if(e.state && e.state.q){
+      applySearchState(e.state);
+      doSearch({skipHistory:true});
+    } else {
+      refreshUiState();
+    }
+  });
+  logUi('INFO', 'modal exists=' + (!!$('configModal')));
+  refreshUiState();
+  scheduleStatusPoll();
 </script>
 </body>
 </html>

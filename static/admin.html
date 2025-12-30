@@ -13,6 +13,10 @@
     input, button, select, textarea{font-size:14px;padding:8px;border:1px solid #d9e0ef;border-radius:6px}
     .btn{background:#0b63d6;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
     .btn.ghost{background:transparent;color:#0b63d6;border:1px solid #d7e3ff}
+    .upload-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0}
+    .upload-row.selected{background:#eef7ff;border-left:3px solid #0b63d6;padding-left:8px}
+    .selected-badge{background:#e6f4ff;color:#0b63d6;border-radius:999px;padding:2px 6px;font-size:11px}
+    body.needs-selection .select-btn{border-color:#ffcc00;box-shadow:0 0 0 1px #ffcc00 inset}
     #priorityList{list-style:none;padding:0;margin:8px 0;max-height:320px;overflow:auto;border:1px dashed #eee;border-radius:6px;background:#fcfdff}
     #priorityList li{display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid #f0f3f8;cursor:grab}
     #priorityList li.dragging{opacity:0.5}
@@ -54,6 +58,11 @@
 
   <div class="box">
     <h3>4) Iniciar indexação (_fulltext)</h3>
+    <div class="note">O _fulltext e uma tabela no DuckDB usada para busca rapida. Criar indice pode levar tempo e usar CPU. Sem indice, a busca por DuckDB fica desativada.</div>
+    <div style="margin:6px 0 8px 0">
+      <label class="small"><input id="autoIndexToggle" type="checkbox" /> Auto indexacao apos conversao (Access)</label>
+      <span id="autoIndexMsg" class="muted" style="margin-left:8px"></span>
+    </div>
     <label><input type="checkbox" id="dropCheckbox" /> Recriar _fulltext?</label><br/>
     <div class="top-row">
       <label>Chunk: <input id="chunk" type="number" value="2000" style="width:120px" /></label>
@@ -66,11 +75,70 @@
   <div class="box">
     <h3>Status</h3>
     <div id="statusBox" class="muted">Carregando status...</div>
+    <div id="uiLog" class="muted" style="margin-top:6px;white-space:pre-wrap"></div>
   </div>
 
 <script>
 /* Helper fetch JSON */
-async function apiJSON(path, opts){ const r = await fetch(path, opts); return r.json(); }
+async function apiJSON(path, opts){
+  const r = await fetch(path, opts);
+  let data = null;
+  try{
+    data = await r.json();
+  }catch(e){
+    logUi('ERROR', 'json parse fail ' + path);
+    throw e;
+  }
+  if(!r.ok){
+    const errMsg = (data && data.error) ? data.error : 'http ' + r.status;
+    logUi('ERROR', path + ' ' + errMsg);
+  }
+  return data;
+}
+let statusPollTimer = null;
+const STATUS_POLL_ACTIVE_MS = 3000;
+const STATUS_POLL_IDLE_MS = 30000;
+const LOG_LIMIT = 6;
+let uiLogEntries = [];
+
+function logUi(level, msg){
+  const ts = new Date().toISOString().slice(11,19);
+  const line = ts + ' ' + level + ' ' + msg;
+  uiLogEntries.push(line);
+  if(uiLogEntries.length > LOG_LIMIT) uiLogEntries.shift();
+  const el = document.getElementById('uiLog');
+  if(el) el.textContent = uiLogEntries.join('\n');
+  if(level === 'ERROR') console.error(line);
+  else if(level === 'WARN') console.warn(line);
+  else console.log(line);
+  if(level === 'ERROR' || level === 'WARN'){
+    try{
+      fetch('/client/log',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:level,msg:msg})});
+    }catch(e){}
+  }
+}
+
+window.addEventListener('error', (e)=>{
+  const msg = e && e.message ? e.message : 'js error';
+  logUi('ERROR', 'js ' + msg);
+});
+window.addEventListener('unhandledrejection', (e)=>{
+  const msg = e && e.reason ? e.reason : 'promise error';
+  logUi('ERROR', 'promise ' + msg);
+});
+
+function getStatusPollDelay(){
+  const active = window.__lastStatus && ((window.__lastStatus.conversion && window.__lastStatus.conversion.running) || window.__lastStatus.indexing);
+  return active ? STATUS_POLL_ACTIVE_MS : STATUS_POLL_IDLE_MS;
+}
+
+function scheduleStatusPoll(){
+  if(statusPollTimer) clearTimeout(statusPollTimer);
+  statusPollTimer = setTimeout(async ()=>{
+    await refreshStatus();
+    scheduleStatusPoll();
+  }, getStatusPollDelay());
+}
 
 /* Initial load */
 async function refreshAll(){
@@ -97,20 +165,32 @@ document.getElementById('uploadForm').addEventListener('submit', async (e)=>{
 async function refreshUploads(){
   try{
     const data = await apiJSON('/admin/list_uploads');
-    document.getElementById('currentDb').textContent = data.current_db || '(nenhum)';
+    const currentDb = data.current_db || '';
+    window.__currentDb = currentDb;
+    document.getElementById('currentDb').textContent = currentDb || '(nenhum)';
+    document.body.classList.toggle('needs-selection', !currentDb);
+    const autoIndexToggle = document.getElementById('autoIndexToggle');
+    if(autoIndexToggle && typeof data.auto_index_after_convert !== 'undefined'){
+      autoIndexToggle.checked = !!data.auto_index_after_convert;
+    }
     const ul = document.getElementById('uploadsList');
     if(data.uploads && data.uploads.length){
-      ul.innerHTML = data.uploads.map(f => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
-        <div style="font-weight:600">${f.name}</div>
-        <div style="display:flex;gap:6px">
-          <button class="btn ghost" onclick="selectUpload('${encodeURIComponent(f.name)}')">Selecionar</button>
-          <a href="/uploads/${encodeURIComponent(f.name)}" target="_blank">Baixar</a>
-        </div></div>`).join('');
+      ul.innerHTML = data.uploads.map(f => {
+        const isSelected = currentDb && currentDb.toLowerCase().endsWith(f.name.toLowerCase());
+        const badge = isSelected ? '<span class="selected-badge">Selecionado</span>' : '';
+        return `<div class="upload-row${isSelected ? ' selected' : ''}">
+          <div style="font-weight:600">${f.name} ${badge}</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn ghost select-btn" onclick="selectUpload('${encodeURIComponent(f.name)}')">Selecionar</button>
+            <a href="/uploads/${encodeURIComponent(f.name)}" target="_blank">Baixar</a>
+          </div></div>`;
+      }).join('');
     } else {
       ul.innerHTML = '<div class="muted">Nenhum upload encontrado.</div>';
     }
   }catch(e){
     document.getElementById('uploadsList').textContent = 'Erro ao listar uploads';
+    logUi('ERROR', 'list uploads falhou');
   }
 }
 
@@ -119,7 +199,13 @@ async function selectUpload(nameEnc){
   const name = decodeURIComponent(nameEnc);
   const res = await fetch('/admin/select', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({filename:name}) });
   const j = await res.json();
-  alert(JSON.stringify(j));
+  const msg = document.getElementById('uploadMsg');
+  if(j && j.ok){
+    msg.textContent = 'DB selecionado: ' + name;
+  } else {
+    msg.textContent = 'Erro ao selecionar DB';
+    logUi('ERROR', 'select db falhou');
+  }
   await refreshAll();
 }
 
@@ -129,8 +215,19 @@ async function loadPriorityTables(){
   const msg = document.getElementById('priorityMsg');
   listEl.innerHTML = '';
   msg.textContent = 'Carregando...';
+  if(!window.__currentDb){
+    listEl.innerHTML = '<li class="muted">Selecione um DB para listar tabelas.</li>';
+    msg.textContent = '';
+    return;
+  }
   try{
     const t = await apiJSON('/api/tables');
+    if(t.error){
+      listEl.innerHTML = '<li class="muted">Erro ao carregar tabelas</li>';
+      msg.textContent = '';
+      logUi('ERROR', 'priority tabelas ' + t.error);
+      return;
+    }
     const tables = t.tables || [];
     if(!tables.length){
       listEl.innerHTML = '<li class="muted">Nenhuma tabela encontrada no DB atual.</li>';
@@ -163,6 +260,7 @@ async function loadPriorityTables(){
   }catch(e){
     listEl.innerHTML = '<li class="muted">Erro ao carregar tabelas</li>';
     msg.textContent = '';
+    logUi('ERROR', 'priority tabelas falhou');
   }
 }
 
@@ -226,10 +324,24 @@ document.getElementById('startIndex').addEventListener('click', async ()=>{
   refreshStatus();
 });
 
+/* auto index toggle */
+const autoIndexToggle = document.getElementById('autoIndexToggle');
+if(autoIndexToggle){
+  autoIndexToggle.addEventListener('change', async ()=>{
+    const enabled = autoIndexToggle.checked;
+    const res = await fetch('/admin/set_auto_index', { method:'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({enabled: enabled}) });
+    const j = await res.json();
+    const msg = document.getElementById('autoIndexMsg');
+    if(j && j.ok){ msg.textContent = 'Auto indexacao: ' + (j.auto_index_after_convert ? 'on' : 'off'); }
+    else { msg.textContent = 'Erro ao atualizar auto indexacao'; }
+  });
+}
+
 /* Status poll */
 async function refreshStatus(){
   try{
     const s = await apiJSON('/admin/status');
+    window.__lastStatus = s;
     const el = document.getElementById('statusBox');
     let html = `<div>DB: ${s.db || '(nenhum)'}<br/>_fulltext linhas: ${s.fulltext_count || 0}</div>`;
     if(s.top_tables && s.top_tables.length){
@@ -243,12 +355,13 @@ async function refreshStatus(){
     el.innerHTML = html;
   }catch(e){
     document.getElementById('statusBox').textContent = 'Erro ao obter status';
+    logUi('ERROR', 'status falhou');
   }
 }
 
 /* Startup */
-setInterval(refreshStatus, 3000);
 refreshAll();
+scheduleStatusPoll();
 </script>
 </body>
 </html>

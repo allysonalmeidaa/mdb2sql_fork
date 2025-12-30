@@ -18,9 +18,12 @@
 import os
 import json
 import threading
+import time
 from pathlib import Path
 import sys
-from flask import Flask, request, jsonify, send_from_directory
+from datetime import datetime
+import logging
+from flask import Flask, request, jsonify, send_from_directory, Response
 from werkzeug.utils import secure_filename
 import duckdb
 from rapidfuzz import fuzz
@@ -32,6 +35,35 @@ BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# Logging setup: reduce request noise and log key events only
+def _setup_event_logger():
+    logger = logging.getLogger("mdb2sql")
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter("%(asctime)s - MDB2SQL - %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    return logger
+
+
+_EVENT_LOG = _setup_event_logger()
+
+
+def _safe_ascii(value):
+    try:
+        return str(value).encode("ascii", "ignore").decode("ascii")
+    except Exception:
+        return "?"
+
+
+def log_event(message):
+    try:
+        _EVENT_LOG.info(_safe_ascii(message))
+    except Exception:
+        pass
 
 # Optional modules
 try:
@@ -52,8 +84,10 @@ except Exception:
 try:
     from utils import normalize_text, serialize_value
 except Exception:
+
     def normalize_text(s):
         return str(s).lower() if s is not None else ""
+
     def serialize_value(v):
         if v is None:
             return ""
@@ -61,6 +95,7 @@ except Exception:
             return str(v)
         except Exception:
             return repr(v)
+
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
@@ -80,12 +115,13 @@ convert_status = {
     "total_tables": 0,
     "processed_tables": 0,
     "current_table": "",
-    "percent": 0
+    "percent": 0,
 }
 convert_thread = None
 
 index_lock = threading.Lock()
 index_thread = None
+
 
 def load_config():
     if CONFIG_FILE.exists():
@@ -93,53 +129,148 @@ def load_config():
             return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
-    return {"db_path": str(BASE_DIR / "minha.duckdb"), "priority_tables": [], "auto_index_after_convert": True}
+    return {
+        "db_path": "",
+        "priority_tables": [],
+        "auto_index_after_convert": True,
+        "remember_last_db": False,
+    }
+
 
 def save_config(cfg):
-    CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    CONFIG_FILE.write_text(
+        json.dumps(cfg, ensure_ascii=True, indent=2), encoding="utf-8"
+    )
+
 
 cfg = load_config()
+changed_cfg = False
 # sanitize priority_tables
 if not isinstance(cfg.get("priority_tables"), list):
     cfg["priority_tables"] = []
+    changed_cfg = True
 else:
-    cfg["priority_tables"] = [t for t in cfg["priority_tables"] if t and t != "None"]
-save_config(cfg)
-
-def get_db_path():
-    return os.environ.get("DB_PATH") or cfg.get("db_path")
-
-def set_db_path(p):
-    cfg["db_path"] = str(p)
+    cleaned = [t for t in cfg["priority_tables"] if t and t != "None"]
+    if cleaned != cfg["priority_tables"]:
+        cfg["priority_tables"] = cleaned
+        changed_cfg = True
+if "auto_index_after_convert" not in cfg:
+    cfg["auto_index_after_convert"] = True
+    changed_cfg = True
+if "remember_last_db" not in cfg:
+    cfg["remember_last_db"] = False
+    changed_cfg = True
+if not cfg.get("remember_last_db", False) and cfg.get("db_path"):
+    cfg["db_path"] = ""
+    changed_cfg = True
+if changed_cfg:
     save_config(cfg)
 
+_runtime_db_path = None
+
+
+def remember_last_db_enabled():
+    return bool(cfg.get("remember_last_db", False))
+
+
+def get_db_path():
+    env_db = os.environ.get("DB_PATH")
+    if env_db:
+        return env_db
+    if _runtime_db_path:
+        return _runtime_db_path
+    if remember_last_db_enabled():
+        return cfg.get("db_path")
+    return ""
+
+
+def set_db_path(p):
+    global _runtime_db_path
+    _runtime_db_path = str(p)
+    if remember_last_db_enabled():
+        cfg["db_path"] = str(p)
+        save_config(cfg)
+    else:
+        if cfg.get("db_path"):
+            cfg["db_path"] = ""
+        save_config(cfg)
+
+
+def clear_db_path():
+    global _runtime_db_path
+    _runtime_db_path = None
+    if cfg.get("db_path"):
+        cfg["db_path"] = ""
+        save_config(cfg)
+
+
 app = Flask(__name__, static_folder=str(PROJECT_ROOT / "static"), static_url_path="")
+
 
 # ---------------- Static files ----------------
 @app.route("/")
 def index():
-    return app.send_static_file("index.html")
+    resp = app.send_static_file("index.html")
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
+
+@app.route("/admin")
+def admin_page():
+    resp = app.send_static_file("admin.html")
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return Response(status=204)
+
 
 @app.route("/uploads/<path:filename>")
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_DIR, filename, as_attachment=True)
+
 
 # ---------------- Helpers ----------------
 def duckdb_connect(path):
     # return connection (caller must close)
     return duckdb.connect(str(path))
 
+
+# Cache simples mas efetivo para tabelas
+_tables_cache = {}
+_cache_timestamp = {}
+_cache_ttl = 60  # 60 segundos de cache
+
+
 def list_tables_duckdb(path):
-    """Lista tabelas de um arquivo DuckDB/SQLite."""
+    """Lista tabelas de um arquivo DuckDB/SQLite com cache otimizado."""
     try:
+        # Verificar cache
+        current_time = time.time()
+        if path in _tables_cache and path in _cache_timestamp:
+            if current_time - _cache_timestamp[path] < _cache_ttl:
+                return _tables_cache[path]
+
+        # Buscar do banco
         conn = duckdb_connect(path)
         try:
-            rows = conn.execute("SHOW TABLES").fetchall()
-            return [r[0] for r in rows]
+            # Query mais eficiente - filtrar tabelas do sistema
+            rows = conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='main' AND table_name NOT LIKE '_%'"
+            ).fetchall()
+            tables = [r[0] for r in rows]
+
+            # Atualizar cache
+            _tables_cache[path] = tables
+            _cache_timestamp[path] = current_time
+
+            return tables
         finally:
             conn.close()
     except Exception as e:
         raise
+
 
 def list_tables_access(path):
     """Lista tabelas de um banco Access via ODBC (pyodbc)."""
@@ -147,8 +278,8 @@ def list_tables_access(path):
         raise RuntimeError("pyodbc not installed")
     conn = None
     conn_strs = [
-        fr"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={path};",
-        fr"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={path};",
+        rf"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={path};",
+        rf"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={path};",
     ]
     last_err = None
     for cs in conn_strs:
@@ -166,7 +297,9 @@ def list_tables_access(path):
         try:
             for row in cur.tables():
                 try:
-                    tname = getattr(row, "table_name", None) or (row[2] if len(row) > 2 else None)
+                    tname = getattr(row, "table_name", None) or (
+                        row[2] if len(row) > 2 else None
+                    )
                 except Exception:
                     tname = None
                 if tname and not str(tname).startswith("MSys"):
@@ -174,7 +307,9 @@ def list_tables_access(path):
         except Exception:
             # fallback via MSysObjects
             try:
-                rows = cur.execute("SELECT Name FROM MSysObjects WHERE Type In (1,4) AND Flags = 0").fetchall()
+                rows = cur.execute(
+                    "SELECT Name FROM MSysObjects WHERE Type In (1,4) AND Flags = 0"
+                ).fetchall()
                 tables = [r[0] for r in rows]
             except Exception:
                 tables = []
@@ -185,6 +320,7 @@ def list_tables_access(path):
         except Exception:
             pass
 
+
 # ---------------- Admin endpoints ----------------
 @app.route("/admin/list_uploads", methods=["GET"])
 def admin_list_uploads():
@@ -192,105 +328,262 @@ def admin_list_uploads():
     for p in sorted(UPLOAD_DIR.iterdir(), key=lambda x: x.name):
         if p.is_file():
             files.append({"name": p.name, "path": str(p), "size": p.stat().st_size})
-    return jsonify({
-        "uploads": files,
-        "current_db": cfg.get("db_path"),
-        "priority_tables": cfg.get("priority_tables", []),
-        "auto_index_after_convert": cfg.get("auto_index_after_convert", True)
-    })
+    return jsonify(
+        {
+            "uploads": files,
+            "current_db": get_db_path(),
+            "priority_tables": cfg.get("priority_tables", []),
+            "auto_index_after_convert": cfg.get("auto_index_after_convert", True),
+            "remember_last_db": cfg.get("remember_last_db", False),
+        }
+    )
+
 
 @app.route("/admin/status", methods=["GET"])
 def admin_status():
-    status = {"indexing": False, "db": get_db_path(), "fulltext_count": 0, "top_tables": []}
+    dbpath = get_db_path()
+    status = {
+        "indexing": False,
+        "db": dbpath or "",
+        "fulltext_count": 0,
+        "top_tables": [],
+    }
     with index_lock:
         if index_thread and index_thread.is_alive():
             status["indexing"] = True
     # try _fulltext info
-    try:
-        conn = duckdb_connect(get_db_path())
+    if dbpath and Path(dbpath).exists():
         try:
-            total = conn.execute("SELECT COUNT(*) FROM _fulltext").fetchone()[0]
-            status["fulltext_count"] = int(total)
-            rows = conn.execute("SELECT table_name, COUNT(*) as c FROM _fulltext GROUP BY table_name ORDER BY c DESC LIMIT 50").fetchall()
-            status["top_tables"] = [{"table": r[0], "count": int(r[1])} for r in rows]
-        except Exception:
-            status["fulltext_count"] = 0
-            status["top_tables"] = []
-        finally:
-            conn.close()
-    except Exception as e:
-        status["error_fulltext"] = str(e)
+            conn = duckdb_connect(dbpath)
+            try:
+                total = conn.execute("SELECT COUNT(*) FROM _fulltext").fetchone()[0]
+                status["fulltext_count"] = int(total)
+                rows = conn.execute(
+                    "SELECT table_name, COUNT(*) as c FROM _fulltext GROUP BY table_name ORDER BY c DESC LIMIT 50"
+                ).fetchall()
+                status["top_tables"] = [{"table": r[0], "count": int(r[1])} for r in rows]
+            except Exception:
+                status["fulltext_count"] = 0
+                status["top_tables"] = []
+            finally:
+                conn.close()
+        except Exception as e:
+            status["error_fulltext"] = str(e)
     with convert_lock:
         status["conversion"] = dict(convert_status)
     status["priority_tables"] = cfg.get("priority_tables", [])
     status["auto_index_after_convert"] = cfg.get("auto_index_after_convert", True)
+    status["remember_last_db"] = cfg.get("remember_last_db", False)
     return jsonify(status)
+
+
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    """Health check completo com metricas."""
+    current_time = time.time()
+
+    # Metricas de cache
+    cache_age = 0
+    db_path = get_db_path()
+    if db_path in _cache_timestamp:
+        cache_age = current_time - _cache_timestamp[db_path]
+
+    return jsonify(
+        {
+            "status": "healthy",
+            "current_db": db_path or "none",
+            "timestamp": datetime.now().isoformat(),
+            "cache_info": {
+                "tables_cached": len(_tables_cache),
+                "cache_age_seconds": int(cache_age),
+                "cache_ttl": _cache_ttl,
+            },
+            "database": {
+                "current_db": db_path or "none",
+                "db_exists": Path(db_path).exists() if db_path else False,
+            },
+            "system": {
+                "upload_folder": str(UPLOAD_DIR),
+                "allowed_extensions": list(ALLOWED_EXTENSIONS),
+            },
+        }
+    )
+
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+    return admin_upload()
+
+@app.route("/api/list_uploads", methods=["GET"])
+def api_list_uploads():
+    files = []
+    for p in sorted(UPLOAD_DIR.iterdir(), key=lambda x: x.name):
+        if p.is_file():
+            st = p.stat()
+            files.append(
+                {
+                    "name": p.name,
+                    "size": st.st_size,
+                    "modified": datetime.fromtimestamp(st.st_mtime).isoformat(),
+                }
+            )
+    return jsonify({"files": files})
+
+@app.route("/api/select_db", methods=["POST"])
+def api_select_db():
+    data = request.get_json() or {}
+    filename = data.get("filename")
+    if not filename:
+        return jsonify({"error": "filename required"}), 400
+    fpath = UPLOAD_DIR / secure_filename(filename)
+    if not fpath.exists():
+        return jsonify({"error": "file not found"}), 404
+    ext = fpath.suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return jsonify({"error": f"Invalid file type: {ext}"}), 400
+    set_db_path(str(fpath))
+    log_event(f"event=db_select path={fpath}")
+    return jsonify({"ok": True, "db": str(fpath)})
+
 
 @app.route("/admin/upload", methods=["POST"])
 def admin_upload():
     global convert_thread
-    if 'file' not in request.files:
+    if "file" not in request.files:
         return jsonify({"error": "arquivo não enviado"}), 400
-    f = request.files['file']
-    if f.filename == '':
+    f = request.files["file"]
+    if f.filename == "":
         return jsonify({"error": "nome de arquivo inválido"}), 400
     filename = secure_filename(f.filename)
     ext = Path(filename).suffix.lower()
     dest = UPLOAD_DIR / filename
     f.save(dest)
+    try:
+        log_event(
+            f"event=upload name={filename} ext={ext} size={dest.stat().st_size}"
+        )
+    except Exception:
+        pass
     # duckdb -> select immediately
     if ext == ".duckdb":
         set_db_path(str(dest))
+        log_event(f"event=db_select path={dest}")
         return jsonify({"ok": True, "db_path": str(dest)})
     # access -> convert in background if converter available
     if ext in (".mdb", ".accdb"):
         if convert_access_to_duckdb is None:
-            return jsonify({"error": "Conversão não disponível: access_convert.py ausente ou dependências não instaladas"}), 500
+            return jsonify(
+                {
+                    "error": "Conversão não disponível: access_convert.py ausente ou dependências não instaladas"
+                }
+            ), 500
         with convert_lock:
             if convert_status.get("running"):
                 return jsonify({"error": "Já existe uma conversão em execução"}), 409
             out_duckdb = UPLOAD_DIR / f"{Path(filename).stem}.duckdb"
-            convert_status.update({
-                "running": True, "ok": None, "msg": "started",
-                "input": str(dest), "output": str(out_duckdb),
-                "total_tables": 0, "processed_tables": 0, "current_table": "", "percent": 0
-            })
+            convert_status.update(
+                {
+                    "running": True,
+                    "ok": None,
+                    "msg": "started",
+                    "input": str(dest),
+                    "output": str(out_duckdb),
+                    "total_tables": 0,
+                    "processed_tables": 0,
+                    "current_table": "",
+                    "percent": 0,
+                }
+            )
+            log_event(f"event=convert_start input={dest} output={out_duckdb}")
+
             def progress_cb(p):
                 with convert_lock:
-                    convert_status.update({k: v for k, v in p.items() if k in ("total_tables", "processed_tables", "current_table", "percent", "msg")})
+                    convert_status.update(
+                        {
+                            k: v
+                            for k, v in p.items()
+                            if k
+                            in (
+                                "total_tables",
+                                "processed_tables",
+                                "current_table",
+                                "percent",
+                                "msg",
+                            )
+                        }
+                    )
+
             def run_convert():
                 global convert_status
                 try:
-                    ok, msg = convert_access_to_duckdb(str(dest), str(out_duckdb), chunk_size=20000, progress_callback=progress_cb)
+                    ok, msg = convert_access_to_duckdb(
+                        str(dest),
+                        str(out_duckdb),
+                        chunk_size=20000,
+                        progress_callback=progress_cb,
+                    )
                     with convert_lock:
                         convert_status["running"] = False
                         convert_status["ok"] = bool(ok)
                         convert_status["msg"] = msg
-                        convert_status["percent"] = 100 if ok else convert_status.get("percent", 0)
+                        convert_status["percent"] = (
+                            100 if ok else convert_status.get("percent", 0)
+                        )
+                    log_event(
+                        f"event=convert_done ok={bool(ok)} output={out_duckdb} msg={msg}"
+                    )
                     if ok:
                         set_db_path(str(out_duckdb))
+                        log_event(f"event=db_select path={out_duckdb}")
                         # optional auto-index with create_or_resume_fulltext
-                        if cfg.get("auto_index_after_convert", True) and create_or_resume_fulltext:
+                        if (
+                            cfg.get("auto_index_after_convert", True)
+                            and create_or_resume_fulltext
+                        ):
                             # reutiliza o mesmo mecanismo de indexação monitorado por /admin/status
                             global index_thread
                             with index_lock:
                                 if not index_thread or not index_thread.is_alive():
+
                                     def run_index_auto():
                                         try:
-                                            create_or_resume_fulltext(str(out_duckdb), drop=False, chunk=2000, batch_insert=1000)
+                                            log_event(
+                                                f"event=index_start db={out_duckdb} drop=False chunk=2000 batch=1000"
+                                            )
+                                            create_or_resume_fulltext(
+                                                str(out_duckdb),
+                                                drop=False,
+                                                chunk=2000,
+                                                batch_insert=1000,
+                                            )
+                                            log_event(f"event=index_done db={out_duckdb}")
                                         except Exception as e:
-                                            print("auto index failed:", e)
-                                    index_thread = threading.Thread(target=run_index_auto, daemon=True)
+                                            log_event(
+                                                f"event=index_error db={out_duckdb} err={e}"
+                                            )
+
+                                    index_thread = threading.Thread(
+                                        target=run_index_auto, daemon=True
+                                    )
                                     index_thread.start()
                 except Exception as e:
                     with convert_lock:
                         convert_status["running"] = False
                         convert_status["ok"] = False
                         convert_status["msg"] = f"exception: {e}"
+                    log_event(f"event=convert_error input={dest} err={e}")
+
             convert_thread = threading.Thread(target=run_convert, daemon=True)
             convert_thread.start()
-        return jsonify({"ok": True, "status": "converting", "input": str(dest), "output": str(out_duckdb)})
+        return jsonify(
+            {
+                "ok": True,
+                "status": "converting",
+                "input": str(dest),
+                "output": str(out_duckdb),
+            }
+        )
     return jsonify({"error": f"extensão não permitida: {ext}"}), 400
+
 
 @app.route("/admin/select", methods=["POST"])
 def admin_select():
@@ -303,7 +596,9 @@ def admin_select():
         return jsonify({"error": "arquivo não encontrado"}), 404
     # set as current DB (duckdb or access). Frontend /api/tables will handle listing with fallback.
     set_db_path(str(fpath))
+    log_event(f"event=db_select path={fpath}")
     return jsonify({"ok": True, "db_path": str(fpath)})
+
 
 @app.route("/admin/delete", methods=["POST"])
 def admin_delete():
@@ -320,11 +615,11 @@ def admin_delete():
     if not target.exists():
         return jsonify({"error": "arquivo não encontrado"}), 404
     try:
-        current = cfg.get("db_path")
+        current = get_db_path()
         if current and Path(current).resolve() == target.resolve():
-            cfg["db_path"] = ""
-            save_config(cfg)
+            clear_db_path()
         target.unlink()
+        log_event(f"event=db_delete name={target.name}")
         # remove converted duckdb with same stem
         duck_out = UPLOAD_DIR / f"{target.stem}.duckdb"
         if duck_out.exists():
@@ -335,6 +630,7 @@ def admin_delete():
         return jsonify({"ok": True, "deleted": str(target.name)})
     except Exception as e:
         return jsonify({"error": f"falha ao apagar: {e}"}), 500
+
 
 @app.route("/admin/set_priority", methods=["POST"])
 def admin_set_priority():
@@ -350,10 +646,29 @@ def admin_set_priority():
     save_config(cfg)
     return jsonify({"ok": True, "priority_tables": lst})
 
+
+@app.route("/admin/set_auto_index", methods=["POST"])
+def admin_set_auto_index():
+    data = request.get_json() or {}
+    enabled = data.get("enabled")
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
+    if enabled is None:
+        return jsonify({"error": "enabled required"}), 400
+    cfg["auto_index_after_convert"] = bool(enabled)
+    save_config(cfg)
+    log_event(f"event=auto_index_set enabled={cfg['auto_index_after_convert']}")
+    return jsonify(
+        {"ok": True, "auto_index_after_convert": cfg["auto_index_after_convert"]}
+    )
+
+
 @app.route("/admin/start_index", methods=["POST"])
 def admin_start_index():
     if create_fulltext is None and create_or_resume_fulltext is None:
-        return jsonify({"error": "indexador não disponível (create_fulltext.py ausente)"}), 500
+        return jsonify(
+            {"error": "indexador não disponível (create_fulltext.py ausente)"}
+        ), 500
     data = request.get_json() or {}
     drop = bool(data.get("drop", False))
     chunk = int(data.get("chunk", 2000))
@@ -363,29 +678,95 @@ def admin_start_index():
         if index_thread and index_thread.is_alive():
             return jsonify({"error": "indexação já em execução"}), 409
         dbpath = get_db_path()
+
         def run_index():
             try:
+                log_event(
+                    f"event=index_start db={dbpath} drop={drop} chunk={chunk} batch={batch}"
+                )
                 if create_or_resume_fulltext:
-                    create_or_resume_fulltext(dbpath, drop=drop, chunk=chunk, batch_insert=batch)
+                    create_or_resume_fulltext(
+                        dbpath, drop=drop, chunk=chunk, batch_insert=batch
+                    )
                 else:
                     # attempt both names
                     try:
                         from create_fulltext import create_or_resume_fulltext as cf
+
                         cf(dbpath, drop=drop, chunk=chunk, batch_insert=batch)
                     except Exception as e:
-                        print("index error:", e)
+                        log_event(f"event=index_error db={dbpath} err={e}")
             except Exception as e:
-                print("Indexação falhou:", e)
+                log_event(f"event=index_error db={dbpath} err={e}")
+            log_event(f"event=index_done db={dbpath}")
+
         index_thread = threading.Thread(target=run_index, daemon=True)
         index_thread.start()
     return jsonify({"ok": True, "started": True, "db": get_db_path()})
 
+
+# ---------------- Client log ----------------
+@app.route("/client/log", methods=["POST"])
+def client_log():
+    data = request.get_json() or {}
+    level = str(data.get("level", "info")).lower()
+    msg = data.get("msg", "")
+    if msg:
+        msg = msg.replace("\n", " ").replace("\r", " ")
+    if len(msg) > 500:
+        msg = msg[:500]
+    log_event(f"event=client_log level={level} msg={msg}")
+    return jsonify({"ok": True})
+
+
 # ---------------- Search + table endpoints ----------------
+import gzip
+import re
+
+
+# Função de compressão para respostas grandes
+def compress_response(response):
+    """Comprime respostas JSON grandes com gzip"""
+    if response.content_type == "application/json" and len(response.data) > 1000:
+        response.data = gzip.compress(response.data)
+        response.headers["Content-Encoding"] = "gzip"
+        response.headers["Vary"] = "Accept-Encoding"
+    return response
+
+
+# Função de validação de nomes de tabela
+def validar_nome_tabela(table_name):
+    """Valida e sanitiza nome de tabela para prevenir SQL injection"""
+    if not table_name or not isinstance(table_name, str):
+        return False
+    # Permitir apenas letras, números e underscores
+    if not re.match(r"^[A-Za-z0-9_]+$", table_name):
+        return False
+    if len(table_name) > 64:
+        return False
+    return True
+
+
+# Adicionar compressão automática após cada requisição
+@app.after_request
+def after_request(response):
+    return compress_response(response)
+
+
 @app.route("/api/tables", methods=["GET"])
 def api_tables():
     dbpath = get_db_path()
     if not dbpath:
-        return jsonify({"error": "No DB selected"}), 400
+        return jsonify({"tables": [], "count": 0, "error": "Nenhum DB selecionado"}), 200
+
+    # Verificar se o arquivo existe
+    if not Path(dbpath).exists():
+        log_event(f"event=api_tables_missing db={dbpath}")
+        return jsonify({"error": f"Database file not found: {dbpath}"}), 404
+
+    # Parâmetro opcional para incluir estatísticas
+    include_stats = request.args.get("stats", "false").lower() == "true"
+
     ext = Path(dbpath).suffix.lower()
     try:
         if ext in (".duckdb", ".db", ".sqlite", ".sqlite3"):
@@ -395,8 +776,29 @@ def api_tables():
             tables = list_tables_access(dbpath)
         else:
             return jsonify({"error": f"Unsupported DB format: {dbpath}"}), 400
-        return jsonify({"tables": tables})
+
+        response = {"tables": tables, "count": len(tables)}
+
+        # Adicionar estatísticas apenas se solicitado
+        if include_stats:
+            stats = {
+                "total": len(tables),
+                "prefixos": {},
+                "tamanho_medio": sum(len(t) for t in tables) / len(tables)
+                if tables
+                else 0,
+            }
+
+            # Análise rápida de prefixos
+            for tabela in tables:
+                prefixo = tabela.split("_")[0] if "_" in tabela else "OUTROS"
+                stats["prefixos"][prefixo] = stats["prefixos"].get(prefixo, 0) + 1
+
+            response["stats"] = stats
+
+        return jsonify(response)
     except Exception as e:
+        log_event(f"event=api_tables_error err={e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -410,7 +812,11 @@ def api_table():
         return jsonify({"error": "No DB selected"}), 400
     ext = Path(dbpath).suffix.lower()
     if ext not in (".duckdb", ".db", ".sqlite", ".sqlite3"):
-        return jsonify({"error": f"Table view only supported for DuckDB/SQLite. Current DB: {dbpath}"}), 400
+        return jsonify(
+            {
+                "error": f"Table view only supported for DuckDB/SQLite. Current DB: {dbpath}"
+            }
+        ), 400
     try:
         limit = int(request.args.get("limit", 50))
         offset = int(request.args.get("offset", 0))
@@ -478,14 +884,16 @@ def api_table():
                     row_obj[cname] = None
             data.append(row_obj)
 
-        return jsonify({
-            "table": table,
-            "total": int(total),
-            "limit": limit,
-            "offset": offset,
-            "columns": cols,
-            "rows": data,
-        })
+        return jsonify(
+            {
+                "table": table,
+                "total": int(total),
+                "limit": limit,
+                "offset": offset,
+                "columns": cols,
+                "rows": data,
+            }
+        )
     except Exception as e:
         try:
             conn.close()
@@ -494,7 +902,9 @@ def api_table():
         return jsonify({"error": str(e)}), 500
 
 
-def api_search_duckdb(q, per_table, candidate_limit, total_limit, token_mode, min_score, tables=None):
+def api_search_duckdb(
+    q, per_table, candidate_limit, total_limit, token_mode, min_score, tables=None
+):
     q_norm = normalize_text(q)
     tokens = [t for t in q_norm.split() if t]
     if tokens:
@@ -550,7 +960,15 @@ def api_search_duckdb(q, per_table, candidate_limit, total_limit, token_mode, mi
         score = fuzz.token_set_ratio(q_norm, content_norm)
         if min_score is not None and score < min_score:
             continue
-        candidates.append({"score": score, "table": table_name, "pk_col": pk_col, "pk_value": pk_value, "row_json": row_json})
+        candidates.append(
+            {
+                "score": score,
+                "table": table_name,
+                "pk_col": pk_col,
+                "pk_value": pk_value,
+                "row_json": row_json,
+            }
+        )
     candidates.sort(key=lambda x: x["score"], reverse=True)
     grouped = {}
     table_max = {}
@@ -604,10 +1022,27 @@ def api_search_duckdb(q, per_table, candidate_limit, total_limit, token_mode, mi
     remaining = sorted(grouped.keys(), key=lambda x: table_max.get(x, 0), reverse=True)
     for t in remaining:
         ordered[t] = grouped[t]
-    return {"q": q, "q_norm": q_norm, "candidate_count": len(candidates), "returned_count": total_count, "results": ordered}
+    return {
+        "q": q,
+        "q_norm": q_norm,
+        "candidate_count": len(candidates),
+        "returned_count": total_count,
+        "results": ordered,
+    }
+
 
 # Fallback search for Access DBs via ODBC (pyodbc)
-def fallback_search_access(access_path, q, per_table=10, candidate_limit=1000, total_limit=500, token_mode="any", min_score=None, max_tables=500, max_rows_per_table=2000):
+def fallback_search_access(
+    access_path,
+    q,
+    per_table=10,
+    candidate_limit=1000,
+    total_limit=500,
+    token_mode="any",
+    min_score=None,
+    max_tables=500,
+    max_rows_per_table=2000,
+):
     if pyodbc is None:
         return {"error": "pyodbc not installed; fallback unavailable"}
     q_norm = q.lower()
@@ -618,8 +1053,8 @@ def fallback_search_access(access_path, q, per_table=10, candidate_limit=1000, t
     conn = None
     try:
         conn_strs = [
-            fr"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={access_path};",
-            fr"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={access_path};",
+            rf"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={access_path};",
+            rf"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={access_path};",
         ]
         last_err = None
         for cs in conn_strs:
@@ -636,22 +1071,28 @@ def fallback_search_access(access_path, q, per_table=10, candidate_limit=1000, t
         try:
             for row in cur.tables():
                 try:
-                    tname = getattr(row, "table_name", None) or (row[2] if len(row) > 2 else None)
+                    tname = getattr(row, "table_name", None) or (
+                        row[2] if len(row) > 2 else None
+                    )
                 except:
                     tname = None
                 if tname and not str(tname).startswith("MSys"):
                     tables.append(tname)
         except Exception:
             try:
-                rows = cur.execute("SELECT Name FROM MSysObjects WHERE Type In (1,4) AND Flags = 0").fetchall()
+                rows = cur.execute(
+                    "SELECT Name FROM MSysObjects WHERE Type In (1,4) AND Flags = 0"
+                ).fetchall()
                 tables = [r[0] for r in rows]
             except Exception:
                 tables = []
         if not tables:
             return {"error": "No user tables found in Access DB."}
         tables = tables[:max_tables]
+
         def build_where_for_columns(cols):
-            if not tokens: return None
+            if not tokens:
+                return None
             parts = []
             for col in cols:
                 if token_mode == "any":
@@ -659,19 +1100,26 @@ def fallback_search_access(access_path, q, per_table=10, candidate_limit=1000, t
                 else:
                     parts.append(" AND ".join([f"{col} LIKE ?" for _ in tokens]))
             return "(" + " OR ".join(parts) + ")" if parts else None
+
         for t in tables:
             cols = []
             try:
                 cols_info = cur.columns(table=t)
                 for c in cols_info:
-                    col_name = getattr(c, "column_name", None) or (c[3] if len(c) > 3 else None)
+                    col_name = getattr(c, "column_name", None) or (
+                        c[3] if len(c) > 3 else None
+                    )
                     data_type = None
                     try:
-                        data_type = getattr(c, "type_name", None) or (c[5] if len(c) > 5 else None)
+                        data_type = getattr(c, "type_name", None) or (
+                            c[5] if len(c) > 5 else None
+                        )
                     except:
                         data_type = None
                     if col_name:
-                        cols.append((col_name, str(data_type).upper() if data_type else ""))
+                        cols.append(
+                            (col_name, str(data_type).upper() if data_type else "")
+                        )
             except Exception:
                 try:
                     sample = cur.execute(f"SELECT TOP 1 * FROM [{t}]").fetchone()
@@ -680,8 +1128,18 @@ def fallback_search_access(access_path, q, per_table=10, candidate_limit=1000, t
                         cols = [(name, "") for name in desc]
                 except Exception:
                     cols = []
-            text_cols = [c for c, dt in cols if any(x in dt for x in ("CHAR","TEXT","VARCHAR","MEMO"))] if cols else []
-            search_cols = text_cols if text_cols else [c for c, _ in cols] if cols else []
+            text_cols = (
+                [
+                    c
+                    for c, dt in cols
+                    if any(x in dt for x in ("CHAR", "TEXT", "VARCHAR", "MEMO"))
+                ]
+                if cols
+                else []
+            )
+            search_cols = (
+                text_cols if text_cols else [c for c, _ in cols] if cols else []
+            )
             if not search_cols:
                 continue
             where_sql = build_where_for_columns(search_cols)
@@ -694,10 +1152,16 @@ def fallback_search_access(access_path, q, per_table=10, candidate_limit=1000, t
             else:
                 sql = f"SELECT TOP {max_rows_per_table} * FROM [{t}]"
             try:
-                rows = cur.execute(sql, params).fetchall() if params else cur.execute(sql).fetchall()
+                rows = (
+                    cur.execute(sql, params).fetchall()
+                    if params
+                    else cur.execute(sql).fetchall()
+                )
             except Exception:
                 try:
-                    rows = cur.execute(f"SELECT TOP {max_rows_per_table} * FROM [{t}]").fetchall()
+                    rows = cur.execute(
+                        f"SELECT TOP {max_rows_per_table} * FROM [{t}]"
+                    ).fetchall()
                 except Exception:
                     rows = []
             if not rows:
@@ -706,18 +1170,23 @@ def fallback_search_access(access_path, q, per_table=10, candidate_limit=1000, t
             table_results = []
             for r in rows:
                 try:
-                    row_vals = [("" if v is None else str(v)) for v in r]; row_text = " ".join(row_vals).lower()
+                    row_vals = [("" if v is None else str(v)) for v in r]
+                    row_text = " ".join(row_vals).lower()
                 except:
                     row_text = str(r).lower()
                 score = fuzz.token_set_ratio(q_norm, row_text)
                 if min_score is not None and score < min_score:
                     continue
-                pk_col = None; pk_val = None
+                pk_col = None
+                pk_val = None
                 try:
                     if "id" in [c.lower() for c in desc]:
-                        idx = [c.lower() for c in desc].index("id"); pk_col = desc[idx]; pk_val = r[idx]
+                        idx = [c.lower() for c in desc].index("id")
+                        pk_col = desc[idx]
+                        pk_val = r[idx]
                     else:
-                        pk_col = desc[0] if desc else None; pk_val = r[0] if len(r)>0 else None
+                        pk_col = desc[0] if desc else None
+                        pk_val = r[0] if len(r) > 0 else None
                 except:
                     pass
                 row_json = {}
@@ -726,7 +1195,14 @@ def fallback_search_access(access_path, q, per_table=10, candidate_limit=1000, t
                         row_json[cname] = r[i]
                 except:
                     row_json = {"row": str(r)}
-                table_results.append({"score": int(score), "pk_col": pk_col, "pk_value": pk_val, "row": row_json})
+                table_results.append(
+                    {
+                        "score": int(score),
+                        "pk_col": pk_col,
+                        "pk_value": pk_val,
+                        "row": row_json,
+                    }
+                )
                 candidate_count += 1
                 if candidate_count >= candidate_limit:
                     break
@@ -745,15 +1221,26 @@ def fallback_search_access(access_path, q, per_table=10, candidate_limit=1000, t
         for p in priority_tables:
             if p in results:
                 ordered[p] = results.pop(p)
-        for t in sorted(results.keys(), key=lambda x: max([it["score"] for it in results[x]]) if results[x] else 0, reverse=True):
+        for t in sorted(
+            results.keys(),
+            key=lambda x: max([it["score"] for it in results[x]]) if results[x] else 0,
+            reverse=True,
+        ):
             ordered[t] = results[t]
-        return {"q": q, "q_norm": q_norm, "candidate_count": candidate_count, "returned_count": returned_count, "results": ordered}
+        return {
+            "q": q,
+            "q_norm": q_norm,
+            "candidate_count": candidate_count,
+            "returned_count": returned_count,
+            "results": ordered,
+        }
     except Exception as e:
         try:
             conn.close()
         except:
             pass
         return {"error": str(e)}
+
 
 @app.route("/api/search", methods=["GET"])
 def api_search():
@@ -765,7 +1252,9 @@ def api_search():
         candidate_limit = int(request.args.get("candidate_limit", 1000))
         total_limit = int(request.args.get("total_limit", 500))
     except:
-        return jsonify({"error": "per_table/candidate_limit/total_limit must be integers"}), 400
+        return jsonify(
+            {"error": "per_table/candidate_limit/total_limit must be integers"}
+        ), 400
     token_mode = request.args.get("token_mode", "any").lower()
     if token_mode not in ("any", "all"):
         token_mode = "any"
@@ -782,17 +1271,39 @@ def api_search():
         tables = [t.strip() for t in tables_param.split(",") if t.strip()]
     dbpath = get_db_path()
     if not dbpath:
+        log_event("event=api_search_no_db")
         return jsonify({"error": "No DB selected"}), 400
     ext = Path(dbpath).suffix.lower()
     if ext in (".duckdb", ".db", ".sqlite", ".sqlite3"):
-        return jsonify(api_search_duckdb(q, per_table, candidate_limit, total_limit, token_mode, min_score, tables=tables))
+        return jsonify(
+            api_search_duckdb(
+                q,
+                per_table,
+                candidate_limit,
+                total_limit,
+                token_mode,
+                min_score,
+                tables=tables,
+            )
+        )
     elif ext in (".mdb", ".accdb"):
-        fb = fallback_search_access(dbpath, q, per_table=per_table, candidate_limit=candidate_limit, total_limit=total_limit, token_mode=token_mode, min_score=min_score)
+        fb = fallback_search_access(
+            dbpath,
+            q,
+            per_table=per_table,
+            candidate_limit=candidate_limit,
+            total_limit=total_limit,
+            token_mode=token_mode,
+            min_score=min_score,
+        )
         if isinstance(fb, dict) and fb.get("error"):
+            log_event(f"event=api_search_error err={fb.get('error')}")
             return jsonify({"error": fb.get("error")}), 500
         return jsonify(fb)
     else:
+        log_event(f"event=api_search_unsupported db={dbpath}")
         return jsonify({"error": f"Unsupported DB format: {dbpath}"}), 400
+
 
 if __name__ == "__main__":
     save_config(cfg)
