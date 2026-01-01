@@ -65,6 +65,69 @@ function createDuckdbFile(filePath) {
   return false;
 }
 
+function tryCreateDuckdbWithFulltextPython(filePath) {
+  const script = [
+    "import duckdb, json, os, sys",
+    "path = sys.argv[1]",
+    "os.makedirs(os.path.dirname(path), exist_ok=True)",
+    "con = duckdb.connect(path)",
+    "con.execute(\"create table if not exists items(id integer, name varchar)\")",
+    "con.execute(\"delete from items\")",
+    "con.execute(\"insert into items values (1, 'alpha'), (2, 'beta')\")",
+    "con.execute(\"create table if not exists _fulltext (table_name varchar, pk_col varchar, pk_value varchar, row_offset bigint, content_norm text, row_json text)\")",
+    "con.execute(\"delete from _fulltext\")",
+    "row_json = json.dumps({'id': 1, 'name': 'alpha'})",
+    "con.execute(\"insert into _fulltext values (?, ?, ?, ?, ?, ?)\", ['items','id','1',0,'alpha',row_json])",
+    "con.close()"
+  ].join("\n");
+  try {
+    execFileSync("python", ["-c", script, filePath], {
+      stdio: "ignore",
+      timeout: 20000
+    });
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function tryCreateDuckdbWithFulltextCli(cliPath, filePath) {
+  const rowJson = "{\"id\":1,\"name\":\"alpha\"}";
+  const sql = [
+    "create table if not exists items(id integer, name varchar)",
+    "delete from items",
+    "insert into items values (1, 'alpha'), (2, 'beta')",
+    "create table if not exists _fulltext (table_name varchar, pk_col varchar, pk_value varchar, row_offset bigint, content_norm text, row_json text)",
+    "delete from _fulltext",
+    "insert into _fulltext values ('items','id','1',0,'alpha','" + rowJson + "')"
+  ].join(";");
+  try {
+    execFileSync(cliPath, [filePath, "-c", sql], {
+      stdio: "ignore",
+      timeout: 20000
+    });
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function createDuckdbWithFulltext(filePath) {
+  ensureDir(filePath);
+  if (tryCreateDuckdbWithFulltextPython(filePath)) {
+    return true;
+  }
+  const localCli = path.join(__dirname, "..", "..", "duckdb.exe");
+  if (fs.existsSync(localCli) && tryCreateDuckdbWithFulltextCli(localCli, filePath)) {
+    return true;
+  }
+  if (tryCreateDuckdbWithFulltextCli("duckdb", filePath)) {
+    return true;
+  }
+  writeDummyFile(filePath);
+  return false;
+}
+
 async function uploadFile(request, name, filePath) {
   const buffer = fs.readFileSync(filePath);
   const res = await request.post("/admin/upload", {
@@ -89,7 +152,10 @@ async function cleanupUploads(request) {
     if (!file || !file.name || !file.name.startsWith(TEST_PREFIX)) {
       continue;
     }
-    await request.post("/admin/delete", { data: { filename: file.name } });
+    await request.post("/admin/delete", {
+      data: JSON.stringify({ filename: file.name }),
+      headers: { "content-type": "application/json" }
+    });
   }
 }
 
@@ -314,7 +380,10 @@ test("priority modal lists tables after db select", async ({ page, request }, te
   test.skip(!created, "duckdb not available for table listing");
 
   await uploadFile(request, name, filePath);
-  const selectRes = await request.post("/admin/select", { data: { filename: name } });
+  const selectRes = await request.post("/admin/select", {
+    data: JSON.stringify({ filename: name }),
+    headers: { "content-type": "application/json" }
+  });
   expect(selectRes.ok()).toBeTruthy();
 
   await page.goto("/");
@@ -354,4 +423,231 @@ test("search without db shows alert", async ({ page }) => {
     dialog.accept();
   });
   await page.locator("#searchBtn").click();
+});
+
+test("auto index toggle updates message and state", async ({ page, request }) => {
+  const listRes = await request.get("/admin/list_uploads");
+  expect(listRes.ok()).toBeTruthy();
+  const listJson = await listRes.json();
+  const original = !!listJson.auto_index_after_convert;
+
+  await page.goto("/");
+  await openConfig(page);
+  await page.locator('#flowTabs .tab-btn[data-flow="access"]').click();
+
+  const toggle = page.locator("#autoIndexToggle");
+  const msg = page.locator("#autoIndexMsg");
+  await expect(toggle).toBeVisible();
+
+  await toggle.setChecked(!original);
+  await expect(msg).toContainText("Auto indexacao");
+
+  const afterRes = await request.get("/admin/list_uploads");
+  const afterJson = await afterRes.json();
+  expect(!!afterJson.auto_index_after_convert).toBe(!original);
+
+  await toggle.setChecked(original);
+  await expect(msg).toContainText("Auto indexacao");
+
+  const resetRes = await request.get("/admin/list_uploads");
+  const resetJson = await resetRes.json();
+  expect(!!resetJson.auto_index_after_convert).toBe(original);
+
+  await closeConfig(page);
+});
+
+test("index defaults reset restores values", async ({ page, request }, testInfo) => {
+  const name = `${TEST_PREFIX}index_defaults.duckdb`;
+  const filePath = testInfo.outputPath(name);
+  createDuckdbFile(filePath);
+  await uploadFile(request, name, filePath);
+
+  await page.goto("/");
+  await page.locator("#refreshBtn").click();
+  await page.locator("#openIndex").click();
+  await expect(page.locator("#indexModal")).toBeVisible();
+
+  const startIndex = page.locator("#startIndex");
+  if (await startIndex.isDisabled()) {
+    test.skip(true, "index controls disabled");
+  }
+
+  const chunk = page.locator("#chunk");
+  const batch = page.locator("#batch");
+  const drop = page.locator("#dropCheckbox");
+
+  await chunk.fill("123");
+  await batch.fill("456");
+  await drop.check();
+  await page.locator("#resetIndexDefaults").click();
+
+  await expect(chunk).toHaveValue("2000");
+  await expect(batch).toHaveValue("1000");
+  await expect(drop).not.toBeChecked();
+  await expect(page.locator("#indexMsg")).toContainText("Valores padrao");
+
+  await closeIndex(page);
+});
+
+test("advanced reset restores defaults", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#advancedPanel").click();
+
+  await page.locator("#per_table").fill("5");
+  await page.locator("#candidate_limit").fill("200");
+  await page.locator("#total_limit").fill("50");
+  await page.locator("#token_mode").selectOption("all");
+  await page.locator("#min_score").fill("80");
+  await page.locator("#resetAdvanced").click();
+
+  await expect(page.locator("#per_table")).toHaveValue("10");
+  await expect(page.locator("#candidate_limit")).toHaveValue("1000");
+  await expect(page.locator("#total_limit")).toHaveValue("500");
+  await expect(page.locator("#token_mode")).toHaveValue("any");
+  await expect(page.locator("#min_score")).toHaveValue("70");
+  await expect(page.locator("#advancedMsg")).toContainText("Valores padrao");
+});
+
+test("duckdb ui upload and main buttons", async ({ page, request }, testInfo) => {
+  const name = `${TEST_PREFIX}duckdb_fulltext.duckdb`;
+  const filePath = testInfo.outputPath(name);
+  const created = createDuckdbWithFulltext(filePath);
+  test.skip(!created, "duckdb not available for fulltext");
+
+  await page.goto("/");
+  await openConfig(page);
+  await page.locator("#fileInput").setInputFiles(filePath);
+  await page.locator("#uploadBtn").click();
+  await expect(page.locator("#uploadMsg")).toContainText("Upload ok");
+  await expect(page.locator("#currentDb")).toContainText(name);
+
+  await request.post("/admin/select", {
+    data: JSON.stringify({ filename: name }),
+    headers: { "content-type": "application/json" }
+  });
+  await closeConfig(page);
+
+  await page.locator("#refreshFilesBtn").click();
+  await expect(page.locator("#filesList .file-row", { hasText: name })).toBeVisible();
+  await page.locator("#refreshBtn").click();
+
+  let tables = [];
+  for (let i = 0; i < 5; i += 1) {
+    const tablesRes = await request.get("/api/tables");
+    const tablesJson = await tablesRes.json();
+    tables = Array.isArray(tablesJson.tables) ? tablesJson.tables : [];
+    if (tables.length > 0) {
+      break;
+    }
+    await page.waitForTimeout(500);
+  }
+  if (tables.length === 0) {
+    test.skip(true, "no tables returned");
+  }
+
+  await page.locator("#filterTables").fill("");
+  await page.locator("#refreshTables").click();
+  const tableNameFromApi = String(tables[0]);
+  const tableItem = page.locator("#tableList .table-item", { hasText: tableNameFromApi }).first();
+  await expect(tableItem).toBeVisible();
+  const tableNameClean = tableNameFromApi.trim();
+
+  await tableItem.locator("button").click();
+  if (tableNameClean) {
+    await expect(page.locator("#resultsArea")).toContainText(`Tabela: ${tableNameClean}`);
+  }
+  await page.locator("button", { hasText: "Voltar" }).click();
+
+  await page.locator("#openPriority").click();
+  await expect(page.locator("#priorityModal")).toBeVisible();
+  await page.locator("#refreshPriorityBtnModal").click();
+  const firstTable = page.locator("#allTablesList input[type=checkbox]").first();
+  await firstTable.check();
+  await page.locator("#savePriorityBtnModal").click();
+  await expect(page.locator("#priorityMsg")).toContainText("Prioridades salvas");
+  await closePriority(page);
+
+  await page.locator("#q").fill("alpha");
+  await page.locator("#searchBtn").click();
+  await expect(page.locator("#searchMeta")).toContainText("Resultados");
+  await expect(page.locator("#exportAllBtn")).toBeEnabled();
+
+  const downloadAll = page.waitForEvent("download");
+  await page.locator("#exportAllBtn").click();
+  await downloadAll;
+
+  const downloadTable = page.waitForEvent("download");
+  await page.locator("button", { hasText: "Export CSV" }).first().click();
+  await downloadTable;
+});
+
+test("access ui upload via config", async ({ page }, testInfo) => {
+  const name = `${TEST_PREFIX}access_flow.accdb`;
+  const filePath = testInfo.outputPath(name);
+  writeDummyFile(filePath);
+
+  await page.goto("/");
+  await openConfig(page);
+  await page.locator('#flowTabs .tab-btn[data-flow="access"]').click();
+  await page.locator("#fileInput").setInputFiles(filePath);
+  await page.locator("#uploadBtn").click();
+
+  const msg = page.locator("#uploadMsg");
+  await expect(msg).toContainText(/Convers|Erro|Falha/i);
+  await expect(page.locator("#uploadsList .upload-row", { hasText: name })).toBeVisible();
+  await closeConfig(page);
+});
+
+test("admin page duckdb buttons", async ({ page, request }, testInfo) => {
+  const name = `${TEST_PREFIX}admin_duckdb.duckdb`;
+  const filePath = testInfo.outputPath(name);
+  createDuckdbFile(filePath);
+
+  const statusRes = await request.get("/admin/status");
+  const statusJson = await statusRes.json();
+  const indexerAvailable = statusJson.indexer_available !== false;
+
+  await page.goto("/admin");
+  await page.locator("#fileInput").setInputFiles(filePath);
+  await page.locator("#uploadBtn").click();
+  await expect(page.locator("#uploadMsg")).toContainText(/ok|db_path|output/i);
+
+  const row = page.locator("#uploadsList .upload-row", { hasText: name });
+  await expect(row).toBeVisible();
+  await row.locator("button.select-btn").click();
+  await expect(page.locator("#currentDb")).toContainText(name);
+
+  await page.locator("#refreshTablesBtn").click();
+  const prioNames = page.locator("#priorityList .priority-name");
+  if (await prioNames.count() === 0) {
+    test.skip(true, "priority list empty");
+  }
+
+  await page.locator("#priorityList li button").first().click();
+  await page.locator("#savePriorityBtn").click();
+  await expect(page.locator("#priorityMsg")).toContainText("ok");
+
+  const autoToggle = page.locator("#autoIndexToggle");
+  const autoMsg = page.locator("#autoIndexMsg");
+  await autoToggle.setChecked(!(await autoToggle.isChecked()));
+  await expect(autoMsg).toContainText("Auto indexacao");
+
+  await page.locator("#startIndex").click();
+  if (indexerAvailable) {
+    await expect(page.locator("#indexMsg")).toContainText("ok");
+  } else {
+    await expect(page.locator("#indexMsg")).toContainText("indexador");
+  }
+});
+
+test("admin page access upload", async ({ page }, testInfo) => {
+  const name = `${TEST_PREFIX}admin_access.accdb`;
+  const filePath = testInfo.outputPath(name);
+  writeDummyFile(filePath);
+
+  await page.goto("/admin");
+  await page.locator("#fileInput").setInputFiles(filePath);
+  await page.locator("#uploadBtn").click();
+  await expect(page.locator("#uploadMsg")).toContainText(/ok|error|Convers/i);
+  await expect(page.locator("#uploadsList .upload-row", { hasText: name })).toBeVisible();
 });
