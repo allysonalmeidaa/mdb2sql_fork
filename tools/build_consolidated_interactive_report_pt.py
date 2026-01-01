@@ -11,12 +11,10 @@ Resumo:
 - Se quiser a visão completa (com linhas, min, mediana, max, ocorrências do valor mais frequente), use --mode full.
 - “Valor mais frequente” é o valor que mais aparece na coluna (moda); o percentual é calculado entre registros não nulos, quando disponível.
 
-Uso:
-  python tools/build_consolidated_interactive_report_pt.py ^
-    --analises "C:\mdb2sql_fork\import_folder\Analises" ^
-    --table "RANGER_SOSTAT" ^
-    --out "C:\mdb2sql_fork\import_folder\Analises\relatorio_sostat_interativo.html" ^
-    --top-n 50 --mode slim
+Uso (PowerShell):
+  python tools/build_consolidated_interactive_report_pt.py --analises "./import_folder/analises" --table "RANGER_SOSTAT" --out "./import_folder/analises/relatorio_sostat_interativo.html" --top-n 50 --mode slim
+Uso (Bash/Zsh):
+  python tools/build_consolidated_interactive_report_pt.py --analises "./import_folder/analises" --table "RANGER_SOSTAT" --out "./import_folder/analises/relatorio_sostat_interativo.html" --top-n 50 --mode slim
 """
 from pathlib import Path
 import argparse
@@ -87,7 +85,8 @@ def fig_from_top_values(df_top: pd.DataFrame, title: str):
     return fig
 
 def embed_png_base64(png_path: Path):
-    if not png_path.exists(): return ""
+    if not png_path.exists():
+        return ""
     b = png_path.read_bytes()
     enc = base64.b64encode(b).decode('ascii')
     return f"data:image/png;base64,{enc}"
@@ -150,9 +149,12 @@ def build_table_html(summary_df: pd.DataFrame, mode: str):
     series = summary_df[pct_col] if pct_col and pct_col in summary_df.columns else None
     for i in range(len(summary_df)):
         val = float(series.iloc[i]) if series is not None and pd.notna(series.iloc[i]) else 0.0
-        if val >= 10.0: fill_colors.append('#dff0d8')   # verde claro (valor dominante)
-        elif val >= 2.0: fill_colors.append('#fff7bf')  # amarelo claro (valor relativamente frequente)
-        else: fill_colors.append('#ffffff')
+        if val >= 10.0:
+            fill_colors.append('#dff0d8')   # verde claro (valor dominante)
+        elif val >= 2.0:
+            fill_colors.append('#fff7bf')  # amarelo claro (valor relativamente frequente)
+        else:
+            fill_colors.append('#ffffff')
 
     table_fig = go.Figure(go.Table(
         header=dict(values=headers, fill_color='lightgrey', align='left'),
@@ -181,10 +183,14 @@ def build_html(summary_df: pd.DataFrame, analysis_folder: Path, table_name: str,
 
         # Estatísticas (se houver)
         parts = []
-        if pd.notna(row.get('mean', None)): parts.append(f"Média: {fmt_num(row.get('mean'))}")
-        if pd.notna(row.get('desvio_padrao_pop', None)): parts.append(f"Desvio (pop.): {fmt_num(row.get('desvio_padrao_pop'))}")
-        if pd.notna(row.get('variancia', None)): parts.append(f"Variância (pop.): {fmt_num(row.get('variancia'))}")
-        if pd.notna(row.get('coef_variacao', None)): parts.append(f"CV: {fmt_num(row.get('coef_variacao'))}")
+        if pd.notna(row.get('mean', None)):
+            parts.append(f"Média: {fmt_num(row.get('mean'))}")
+        if pd.notna(row.get('desvio_padrao_pop', None)):
+            parts.append(f"Desvio (pop.): {fmt_num(row.get('desvio_padrao_pop'))}")
+        if pd.notna(row.get('variancia', None)):
+            parts.append(f"Variância (pop.): {fmt_num(row.get('variancia'))}")
+        if pd.notna(row.get('coef_variacao', None)):
+            parts.append(f"CV: {fmt_num(row.get('coef_variacao'))}")
         if pd.notna(row.get('min', None)) or pd.notna(row.get('median_approx', None)) or pd.notna(row.get('max', None)):
             parts.append(f"Min: {fmt_num(row.get('min'))} • Mediana (aprox.): {fmt_num(row.get('median_approx'))} • Max: {fmt_num(row.get('max'))}")
         stats_line = " • ".join([p for p in parts if p])
@@ -238,7 +244,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Gerar relatório interativo (PT) a partir da pasta Analises.")
     p.add_argument("--analises", required=True, help="Diretório base das análises (ou a própria pasta da análise).")
     p.add_argument("--table", required=True, help="Nome da tabela (ex.: RANGER_SOSTAT)")
-    p.add_argument("--out", required=True, help="Arquivo HTML de saída (ex.: C:\\...\\relatorio_interativo.html)")
+    p.add_argument("--out", required=True, help="Arquivo HTML de saida (ex: ./saida/relatorio_interativo.html)")
     p.add_argument("--top-n", type=int, default=25, help="Top N mostrado nos gráficos (somente leitura).")
     p.add_argument("--mode", choices=["slim", "full"], default="slim", help="slim=visão enxuta (padrão), full=visão completa.")
     return p.parse_args()
@@ -247,11 +253,13 @@ def main():
     args = parse_args()
     analises = Path(args.analises)
     if not analises.exists():
-        print("Diretório de análises não encontrado:", analises); return 1
+        print("Diretório de análises não encontrado:", analises)
+        return 1
     # aceitar tanto o diretório base quanto a própria pasta de análise
     folder = analises if (analises.is_dir() and analises.name.startswith(f"{args.table}__")) else find_latest_analysis_folder(analises, args.table)
     if not folder:
-        print(f"Nenhuma pasta de análise encontrada para a tabela {args.table} em {analises}"); return 1
+        print(f"Nenhuma pasta de análise encontrada para a tabela {args.table} em {analises}")
+        return 1
     df = read_summary_folder(folder)
     out_file = Path(args.out)
     res = build_html(df, folder, args.table, out_file, top_n_show=args.top_n, mode=args.mode)

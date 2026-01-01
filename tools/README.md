@@ -22,34 +22,51 @@ Este diretório contém utilitários para:
   - `columns/<COL>__top_N.csv`
   - `charts/<COL>__top_N.png`
 - **Exemplos**:
-```pwsh
-python .\tools\analyze_single_table_by_column.py `
-  --db "C:\caminho\meu.duckdb" `
-  --table "RANGER_SOSTAT" `
-  --outdir "C:\saida" --top 20 -v
+PowerShell:
+```
+python tools/analyze_single_table_by_column.py --db "./caminho/meu.duckdb" --table "RANGER_SOSTAT" --outdir "./saida" --top 20 -v
+```
+Bash:
+```
+python tools/analyze_single_table_by_column.py --db "./caminho/meu.duckdb" --table "RANGER_SOSTAT" --outdir "./saida" --top 20 -v
+```
+Zsh:
+```
+python tools/analyze_single_table_by_column.py --db "./caminho/meu.duckdb" --table "RANGER_SOSTAT" --outdir "./saida" --top 20 -v
 ```
 
 ### `batch_analyze_all_dbs.py`
 - **O que faz**: percorre um diretório, encontra bancos por extensão e roda `analyze_single_table_by_column.py` para cada arquivo.
 - **Saída**: cria subpastas por banco dentro de `--outdir`.
 - **Exemplo**:
-```pwsh
-python .\tools\batch_analyze_all_dbs.py `
-  --db-dir "C:\mdb2sql_fork\import_folder\Bancos atuais" `
-  --table "RANGER_SOSTAT" `
-  --outdir "C:\mdb2sql_fork\import_folder\Analises" `
-  --extensions .accdb .mdb .duckdb -v
+PowerShell:
+```
+python tools/batch_analyze_all_dbs.py --db-dir "./import_folder/bancos_atuais" --table "RANGER_SOSTAT" --outdir "./import_folder/analises" --extensions .accdb .mdb .duckdb -v
+```
+Bash:
+```
+python tools/batch_analyze_all_dbs.py --db-dir "./import_folder/bancos_atuais" --table "RANGER_SOSTAT" --outdir "./import_folder/analises" --extensions .accdb .mdb .duckdb -v
+```
+Zsh:
+```
+python tools/batch_analyze_all_dbs.py --db-dir "./import_folder/bancos_atuais" --table "RANGER_SOSTAT" --outdir "./import_folder/analises" --extensions .accdb .mdb .duckdb -v
 ```
 
 ### `build_consolidated_interactive_report_pt.py`
 - **O que faz**: gera um único HTML interativo (Plotly) da **última** pasta de análise para uma tabela.
 - **Consome**: `summary_by_column.csv`, `columns/*.csv` e opcional `charts/*.png`.
 - **Exemplo**:
-```pwsh
-python .\tools\build_consolidated_interactive_report_pt.py `
-  --analises "C:\mdb2sql_fork\import_folder\Analises" `
-  --table "RANGER_SOSTAT" `
-  --out "C:\mdb2sql_fork\import_folder\Analises\relatorio_sostat_interativo.html"
+PowerShell:
+```
+python tools/build_consolidated_interactive_report_pt.py --analises "./import_folder/analises" --table "RANGER_SOSTAT" --out "./import_folder/analises/relatorio_sostat_interativo.html"
+```
+Bash:
+```
+python tools/build_consolidated_interactive_report_pt.py --analises "./import_folder/analises" --table "RANGER_SOSTAT" --out "./import_folder/analises/relatorio_sostat_interativo.html"
+```
+Zsh:
+```
+python tools/build_consolidated_interactive_report_pt.py --analises "./import_folder/analises" --table "RANGER_SOSTAT" --out "./import_folder/analises/relatorio_sostat_interativo.html"
 ```
 
 ### `build_global_report_from_analyses.py`
@@ -59,13 +76,17 @@ python .\tools\build_consolidated_interactive_report_pt.py `
   - `relatorio_global_*.html` (HTML interativo com DataTables e gráficos por coluna).
 - **Consome**: `*__top_*.csv` e `summary_by_column.csv` de cada pasta sob `--analises`.
 - **Exemplo**:
-```pwsh
-python .\tools\build_global_report_from_analyses.py `
-  --analises "C:\mdb2sql_fork\import_folder\analises2" `
-  --out-db "C:\mdb2sql_fork\import_folder\analises2\global_freq_RANGER_SOSTAT.db" `
-  --out-csv "C:\mdb2sql_fork\import_folder\analises2\global_summary_by_column.csv" `
-  --out-html "C:\mdb2sql_fork\import_folder\analises2\relatorio_global_RANGER_SOSTAT.html" `
-  --table "RANGER_SOSTAT" --top-n 50
+PowerShell:
+```
+python tools/build_global_report_from_analyses.py --analises "./import_folder/analises2" --out-db "./import_folder/analises2/global_freq_RANGER_SOSTAT.db" --out-csv "./import_folder/analises2/global_summary_by_column.csv" --out-html "./import_folder/analises2/relatorio_global_RANGER_SOSTAT.html" --table "RANGER_SOSTAT" --top-n 50
+```
+Bash:
+```
+python tools/build_global_report_from_analyses.py --analises "./import_folder/analises2" --out-db "./import_folder/analises2/global_freq_RANGER_SOSTAT.db" --out-csv "./import_folder/analises2/global_summary_by_column.csv" --out-html "./import_folder/analises2/relatorio_global_RANGER_SOSTAT.html" --table "RANGER_SOSTAT" --top-n 50
+```
+Zsh:
+```
+python tools/build_global_report_from_analyses.py --analises "./import_folder/analises2" --out-db "./import_folder/analises2/global_freq_RANGER_SOSTAT.db" --out-csv "./import_folder/analises2/global_summary_by_column.csv" --out-html "./import_folder/analises2/relatorio_global_RANGER_SOSTAT.html" --table "RANGER_SOSTAT" --top-n 50
 ```
 
 ### `encontrar_registro_em_bds.py`
@@ -75,20 +96,38 @@ python .\tools\build_global_report_from_analyses.py `
   - Genérico por valor: `--key "VALOR"` (opcional).
 - **Saída**: imprime no terminal e pode gerar `--out-csv` com metadados (path, found, tabela, sample, error etc.).
 - **Exemplos**:
-```pwsh
-# Filtros compostos em tabela específica
-python .\tools\encontrar_registro_em_bds.py `
-  --dir "C:\mdbs" --filters "RTUNO=1,PNTNO=2304" `
-  --table "RANGER_SOSTAT" --out-csv "C:\saida\resultados.csv" --verbose
+PowerShell:
+```
+# Filtros compostos em tabela especifica
+python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters "RTUNO=1,PNTNO=2304" --table "RANGER_SOSTAT" --out-csv "./saida/resultados.csv" --verbose
 
 # Filtros compostos tentando todas as tabelas
-python .\tools\encontrar_registro_em_bds.py `
-  --dir "C:\mdbs" --filters 'SUBNAM="U,05",RTUNO=1' `
-  --out-csv "C:\saida\resultados_todas.csv" --brief
+python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters 'SUBNAM="U,05",RTUNO=1' --out-csv "./saida/resultados_todas.csv" --brief
 
-# Modo genérico por valor
-python .\tools\encontrar_registro_em_bds.py `
-  --dir "C:\mdbs" --key "U05" --sample --out-csv "C:\saida\resultados_key.csv"
+# Modo generico por valor
+python tools/encontrar_registro_em_bds.py --dir "./mdbs" --key "U05" --sample --out-csv "./saida/resultados_key.csv"
+```
+Bash:
+```
+# Filtros compostos em tabela especifica
+python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters "RTUNO=1,PNTNO=2304" --table "RANGER_SOSTAT" --out-csv "./saida/resultados.csv" --verbose
+
+# Filtros compostos tentando todas as tabelas
+python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters 'SUBNAM="U,05",RTUNO=1' --out-csv "./saida/resultados_todas.csv" --brief
+
+# Modo generico por valor
+python tools/encontrar_registro_em_bds.py --dir "./mdbs" --key "U05" --sample --out-csv "./saida/resultados_key.csv"
+```
+Zsh:
+```
+# Filtros compostos em tabela especifica
+python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters "RTUNO=1,PNTNO=2304" --table "RANGER_SOSTAT" --out-csv "./saida/resultados.csv" --verbose
+
+# Filtros compostos tentando todas as tabelas
+python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters 'SUBNAM="U,05",RTUNO=1' --out-csv "./saida/resultados_todas.csv" --brief
+
+# Modo generico por valor
+python tools/encontrar_registro_em_bds.py --dir "./mdbs" --key "U05" --sample --out-csv "./saida/resultados_key.csv"
 ```
 
 ## Dependências
@@ -108,17 +147,32 @@ Em Windows, para `.accdb`: instale Microsoft Access Database Engine (ACE) compat
 - Sempre versionar os artefatos (`summary_by_column.csv`, `columns/*.csv`, HTMLs) com timestamp/pasta por banco.
 
 ## Dicas Rápidas
-- Para testar rápido um único banco:
-```pwsh
-python .\tools\analyze_single_table_by_column.py --db "C:\meu.duckdb" --table RANGER_SOSTAT --outdir "C:\saida" -v
-python .\tools\build_consolidated_interactive_report_pt.py --analises "C:\saida" --table RANGER_SOSTAT --out "C:\saida\relatorio.html"
+- Para testar rapido um unico banco:
+PowerShell:
 ```
-- Para consolidar globalmente vários bancos já analisados:
-```pwsh
-python .\tools\build_global_report_from_analyses.py `
-  --analises "C:\mdb2sql_fork\import_folder\analises2" `
-  --out-db "C:\mdb2sql_fork\import_folder\analises2\global_freq_RANGER_SOSTAT.db" `
-  --out-csv "C:\mdb2sql_fork\import_folder\analises2\global_summary_by_column.csv" `
-  --out-html "C:\mdb2sql_fork\import_folder\analises2\relatorio_global_RANGER_SOSTAT.html" `
-  --table "RANGER_SOSTAT" --top-n 50
+python tools/analyze_single_table_by_column.py --db "./meu.duckdb" --table RANGER_SOSTAT --outdir "./saida" -v
+python tools/build_consolidated_interactive_report_pt.py --analises "./saida" --table RANGER_SOSTAT --out "./saida/relatorio.html"
+```
+Bash:
+```
+python tools/analyze_single_table_by_column.py --db "./meu.duckdb" --table RANGER_SOSTAT --outdir "./saida" -v
+python tools/build_consolidated_interactive_report_pt.py --analises "./saida" --table RANGER_SOSTAT --out "./saida/relatorio.html"
+```
+Zsh:
+```
+python tools/analyze_single_table_by_column.py --db "./meu.duckdb" --table RANGER_SOSTAT --outdir "./saida" -v
+python tools/build_consolidated_interactive_report_pt.py --analises "./saida" --table RANGER_SOSTAT --out "./saida/relatorio.html"
+```
+- Para consolidar globalmente varios bancos ja analisados:
+PowerShell:
+```
+python tools/build_global_report_from_analyses.py --analises "./import_folder/analises2" --out-db "./import_folder/analises2/global_freq_RANGER_SOSTAT.db" --out-csv "./import_folder/analises2/global_summary_by_column.csv" --out-html "./import_folder/analises2/relatorio_global_RANGER_SOSTAT.html" --table "RANGER_SOSTAT" --top-n 50
+```
+Bash:
+```
+python tools/build_global_report_from_analyses.py --analises "./import_folder/analises2" --out-db "./import_folder/analises2/global_freq_RANGER_SOSTAT.db" --out-csv "./import_folder/analises2/global_summary_by_column.csv" --out-html "./import_folder/analises2/relatorio_global_RANGER_SOSTAT.html" --table "RANGER_SOSTAT" --top-n 50
+```
+Zsh:
+```
+python tools/build_global_report_from_analyses.py --analises "./import_folder/analises2" --out-db "./import_folder/analises2/global_freq_RANGER_SOSTAT.db" --out-csv "./import_folder/analises2/global_summary_by_column.csv" --out-html "./import_folder/analises2/relatorio_global_RANGER_SOSTAT.html" --table "RANGER_SOSTAT" --top-n 50
 ```

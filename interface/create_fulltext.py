@@ -8,10 +8,12 @@ create_fulltext.py (versão segura)
 - Imprime progresso claro por tabela.
 """
 import argparse
-import duckdb
 import json
-from utils import normalize_text, serialize_value
 from pathlib import Path
+
+import duckdb
+
+from interface.utils import normalize_text, serialize_value
 
 BATCH_INSERT = 1000
 CHUNK = 5000

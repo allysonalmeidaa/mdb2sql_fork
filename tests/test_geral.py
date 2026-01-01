@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
-Testes gerais do MDB2SQL - Arquivo único para testes funcionais
-Valida performance, cache, segurança e funcionalidades principais
+Testes gerais do MDB2SQL - arquivo unico para testes funcionais.
+Valida performance, cache, seguranca e funcionalidades principais.
 """
 
 import requests
-import json
 import time
 import sys
-from pathlib import Path
 
 BASE_URL = "http://127.0.0.1:5001"
 
@@ -104,7 +102,7 @@ def test_seguranca_validacao():
         # Testar nome valido
         nome_valido = "RANGER_SOACCU"
         if nome_valido.replace("_", "").isalnum() and len(nome_valido) <= 64:
-            print(f"Nome valido: OK")
+            print("Nome valido: OK")
         else:
             print("Nome valido: ERRO")
             return False
@@ -112,7 +110,7 @@ def test_seguranca_validacao():
         # Testar nome invalido
         nome_invalido = "RANGER; DROP TABLE--"
         if not (nome_invalido.replace("_", "").isalnum() and len(nome_invalido) <= 64):
-            print(f"Nome invalido: OK Rejeitado")
+            print("Nome invalido: OK Rejeitado")
         else:
             print("Nome invalido: ERRO Aceito")
             return False
@@ -180,8 +178,8 @@ def main():
         if response.status_code != 200:
             print("ERRO: Servidor nao respondendo")
             return False
-    except:
-        print("ERRO: Nao conseguiu conectar ao servidor")
+    except Exception as e:
+        print(f"ERRO: Nao conseguiu conectar ao servidor: {e}")
         return False
 
     testes = [

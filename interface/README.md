@@ -24,11 +24,12 @@ Este diretório contém o backend Flask e utilitários para busca local em bases
   - Ignora tabelas de sistema e a própria `_fulltext`.
   - Suporta `drop` para reindex do zero e resume a partir do que já foi indexado.
   - Normaliza texto com `utils.normalize_text` e serializa com `utils.serialize_value`.
-  - Pode ser usado via CLI: `python interface/create_fulltext.py --db <arquivo.duckdb> [--drop] [--chunk N] [--batch N]`.
+- Pode ser usado via CLI: `python -m interface.create_fulltext --db ./arquivo.duckdb [--drop] [--chunk N] [--batch N]`.
 
 - `check_progress.py`: Diagnóstico de progresso.
   - Compara linhas por tabela com o que já está em `_fulltext`.
   - Lista quais tabelas ainda não estão totalmente indexadas.
+  - Exemplo: `python -m interface.check_progress --db ./arquivo.duckdb`.
 
 - `utils.py`: Funções utilitárias comuns.
   - `normalize_text(s)`: remove acentos, lowercase, normaliza pontuação/underscores/hífens e colapsa espaços.
@@ -70,15 +71,33 @@ Este diretório contém o backend Flask e utilitários para busca local em bases
 
 ## Como rodar
 
-- Versão simples:
+- Versao simples:
+PowerShell:
 ```
-python interface/app_flask_search.py
+python -m interface.app_flask_search
+```
+Bash:
+```
+python -m interface.app_flask_search
+```
+Zsh:
+```
+python -m interface.app_flask_search
 ```
 Acesse `http://127.0.0.1:5000/`.
 
-- Versão completa:
+- Versao completa:
+PowerShell:
 ```
-python interface/app_flask_local_search.py
+python -m interface.app_flask_local_search
+```
+Bash:
+```
+python -m interface.app_flask_local_search
+```
+Zsh:
+```
+python -m interface.app_flask_local_search
 ```
 Acesse `http://127.0.0.1:5000/`.
 

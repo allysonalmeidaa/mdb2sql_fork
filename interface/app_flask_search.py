@@ -1,25 +1,102 @@
 # app_flask_search.py
 # Backend Flask para pesquisa global e visualização paginada de tabelas em DuckDB.
 # Ajuste DB_PATH se o seu arquivo .duckdb estiver em outro local.
-from flask import Flask, request, jsonify
-import duckdb
-from pathlib import Path
-from datetime import datetime, date
 import decimal
+import time
+from datetime import date, datetime
+from pathlib import Path
 
-# Caminho padrão para o arquivo DuckDB gerado pelo conversor
-DB_PATH = r"C:\mdb2sql_fork\minha.duckdb"
+import duckdb
+from flask import Flask, jsonify, request, g
+
+from interface.utils import resolve_db_path, clamp_int
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
+UPLOAD_DIR = BASE_DIR / "uploads"
+MAX_LIMIT = 1000
+MAX_PER_TABLE = 200
+MAX_TABLES = 200
+METADATA_TTL_SECONDS = 30
+_METADATA_CACHE = {"ts": 0.0, "tables": [], "columns": {}, "db_path": None}
 
 app = Flask(__name__, static_folder=str(PROJECT_ROOT / "static"), static_url_path="")
 
 def connect_db():
-    db_file = Path(DB_PATH)
+    try:
+        db_file = resolve_db_path(uploads_dir=UPLOAD_DIR)
+    except ValueError as exc:
+        raise FileNotFoundError(str(exc)) from exc
+    if not db_file:
+        raise FileNotFoundError("DB_PATH not set and no .duckdb found in interface/uploads")
     if not db_file.exists():
-        raise FileNotFoundError(f"DuckDB file not found: {DB_PATH}")
-    return duckdb.connect(str(db_file))
+        raise FileNotFoundError(f"DuckDB file not found: {db_file}")
+    return duckdb.connect(str(db_file)), db_file
+
+def get_conn():
+    conn = getattr(g, "_duckdb_conn", None)
+    if conn is None:
+        conn, db_file = connect_db()
+        g._duckdb_conn = conn
+        g._duckdb_path = str(db_file)
+    return conn
+
+def get_db_path():
+    return getattr(g, "_duckdb_path", None)
+
+@app.teardown_appcontext
+def close_conn(exception):
+    conn = g.pop("_duckdb_conn", None)
+    if conn is not None:
+        conn.close()
+
+def quote_ident(name):
+    if not isinstance(name, str) or not name:
+        raise ValueError("Invalid identifier")
+    if "\x00" in name:
+        raise ValueError("Invalid identifier")
+    return '"' + name.replace('"', '""') + '"'
+
+def list_tables(conn):
+    rows = conn.execute("SHOW TABLES").fetchall()
+    return [r[0] for r in rows]
+
+def get_columns_map(conn, tables=None):
+    rows = conn.execute(
+        "SELECT table_name, column_name FROM information_schema.columns "
+        "WHERE table_schema = 'main' ORDER BY table_name, ordinal_position"
+    ).fetchall()
+    cols_by_table = {}
+    for table_name, column_name in rows:
+        if tables is not None and table_name not in tables:
+            continue
+        cols_by_table.setdefault(table_name, []).append(column_name)
+    return cols_by_table
+
+def get_metadata(conn, tables=None):
+    db_path = get_db_path()
+    if db_path and _METADATA_CACHE["db_path"] != db_path:
+        _METADATA_CACHE["ts"] = 0.0
+        _METADATA_CACHE["tables"] = []
+        _METADATA_CACHE["columns"] = {}
+        _METADATA_CACHE["db_path"] = db_path
+    now = time.time()
+    if _METADATA_CACHE["ts"] and (now - _METADATA_CACHE["ts"] < METADATA_TTL_SECONDS):
+        all_tables = _METADATA_CACHE["tables"]
+        cols_map = _METADATA_CACHE["columns"]
+    else:
+        all_tables = list_tables(conn)
+        cols_map = get_columns_map(conn)
+        _METADATA_CACHE["ts"] = now
+        _METADATA_CACHE["tables"] = all_tables
+        _METADATA_CACHE["columns"] = cols_map
+        _METADATA_CACHE["db_path"] = db_path
+    if tables is None:
+        return all_tables, cols_map
+    table_set = set(tables)
+    filtered_tables = [t for t in all_tables if t in table_set]
+    filtered_cols = {t: cols_map.get(t, []) for t in filtered_tables}
+    return filtered_tables, filtered_cols
 
 def serialize_value(v):
     """Converte tipos não-serializáveis para representação JSON-friendly."""
@@ -48,10 +125,8 @@ def index():
 @app.route("/api/tables", methods=["GET"])
 def api_tables():
     try:
-        conn = connect_db()
-        rows = conn.execute("SHOW TABLES").fetchall()
-        conn.close()
-        tables = [r[0] for r in rows]
+        conn = get_conn()
+        tables, _ = get_metadata(conn)
         return jsonify({"tables": tables})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -62,18 +137,17 @@ def api_table():
     Retorna paginação e colunas de uma tabela.
     Parâmetros:
       - name (obrigatório): nome da tabela
-      - limit (opcional): rows por página (default 50)
+      - limit (opcional): rows por pagina (default 50, 0 usa limite maximo)
       - offset (opcional): offset (default 0)
       - col, q, sort, order (opcional): filtros/ordenação usados na visão por tabela
     """
     table = request.args.get("name")
     if not table:
         return jsonify({"error": "table name required (?name=TABLE_NAME)"}), 400
-    try:
-        limit = int(request.args.get("limit", 50))
-        offset = int(request.args.get("offset", 0))
-    except ValueError:
-        return jsonify({"error": "limit and offset must be integers"}), 400
+    limit = clamp_int(request.args.get("limit", 50), 50, min_value=0, max_value=MAX_LIMIT)
+    offset = clamp_int(request.args.get("offset", 0), 0, min_value=0)
+    if limit == 0:
+        limit = MAX_LIMIT
 
     col = request.args.get("col")
     q = request.args.get("q")
@@ -83,52 +157,43 @@ def api_table():
         order = "ASC"
 
     try:
-        conn = connect_db()
-        tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
+        conn = get_conn()
+        tables, cols_map = get_metadata(conn)
         if table not in tables:
-            conn.close()
             return jsonify({"error": f"table not found: {table}"}), 404
 
-        # obter colunas
-        cur = conn.execute(f'SELECT * FROM "{table}" LIMIT 0')
-        cols = [c[0] for c in cur.description]
+        cols = cols_map.get(table, [])
+        if not cols:
+            return jsonify({"error": f"no columns found for table: {table}"}), 404
 
         params = []
         where_clause = ""
         if col and q:
             if col not in cols:
-                conn.close()
                 return jsonify({"error": f"column not found: {col}"}), 400
-            where_clause = f'WHERE CAST("{col}" AS VARCHAR) ILIKE ?'
+            where_clause = f"WHERE CAST({quote_ident(col)} AS VARCHAR) ILIKE ?"
             params.append(f"%{q}%")
 
         order_clause = ""
         if sort:
             if sort not in cols:
-                conn.close()
                 return jsonify({"error": f"sort column not found: {sort}"}), 400
-            order_clause = f'ORDER BY "{sort}" {order}'
+            order_clause = f"ORDER BY {quote_ident(sort)} {order}"
 
-        count_sql = f'SELECT COUNT(*) FROM "{table}"'
+        table_ident = quote_ident(table)
+        count_sql = f"SELECT COUNT(*) FROM {table_ident}"
         if where_clause:
             count_sql += f" {where_clause}"
         total = conn.execute(count_sql, params).fetchone()[0]
 
-        data_sql = f'SELECT * FROM "{table}"'
+        data_sql = f"SELECT * FROM {table_ident}"
         if where_clause:
             data_sql += f" {where_clause}"
         if order_clause:
             data_sql += f" {order_clause}"
-        # LIMIT só se limit > 0 (0 significa ilimitado)
-        if limit > 0:
-            data_sql += f" LIMIT {limit} OFFSET {offset}"
-        else:
-            # quando ilimitado, ainda aplicamos offset se offset>0
-            if offset > 0:
-                data_sql += f" OFFSET {offset}"
+        data_sql += f" LIMIT {limit} OFFSET {offset}"
 
         rows = conn.execute(data_sql, params).fetchall()
-        conn.close()
 
         # serializar rows
         rows_serial = [[serialize_value(v) for v in row] for row in rows]
@@ -149,8 +214,8 @@ def api_search():
     Busca global que retorna LINHAS COMPLETAS por tabela (limitadas por per_table).
     Parâmetros:
       - q (obrigatório): termo a buscar
-      - per_table (opcional): máximo de linhas retornadas por tabela (default 25). Use 0 para ilimitado.
-      - limit_tables (opcional): máximo de tabelas a escanear (default 100). Use 0 para todas as tabelas.
+      - per_table (opcional): maximo de linhas retornadas por tabela (default 25, 0 usa limite maximo).
+      - limit_tables (opcional): maximo de tabelas a escanear (default 100, 0 usa limite maximo).
       - tables (opcional): lista separada por vírgula para limitar escopo
     Resposta:
       { q: "...", scanned_tables: N, results: { table_name: { columns: [...], rows: [[...], ...] } } }
@@ -159,11 +224,12 @@ def api_search():
     if not q:
         return jsonify({"error": "query parameter 'q' required"}), 400
 
-    try:
-        per_table = int(request.args.get("per_table", 25))
-        limit_tables = int(request.args.get("limit_tables", 100))
-    except ValueError:
-        return jsonify({"error": "per_table and limit_tables must be integers"}), 400
+    per_table = clamp_int(request.args.get("per_table", 25), 25, min_value=0, max_value=MAX_PER_TABLE)
+    limit_tables = clamp_int(request.args.get("limit_tables", 100), 100, min_value=0, max_value=MAX_TABLES)
+    if per_table == 0:
+        per_table = MAX_PER_TABLE
+    if limit_tables == 0:
+        limit_tables = MAX_TABLES
 
     tables_param = request.args.get("tables")
     requested_tables = [t.strip() for t in tables_param.split(",")] if tables_param else None
@@ -172,35 +238,32 @@ def api_search():
     results = {}
     scanned = 0
     try:
-        conn = connect_db()
-        all_tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
+        conn = get_conn()
+        all_tables, cols_all = get_metadata(conn)
         # opcional: filtrar apenas nas tabelas requisitadas
         tables = [t for t in all_tables if (requested_tables is None or t in requested_tables)]
         # limitar tabelas escaneadas: se limit_tables == 0 => sem limite
         if limit_tables > 0:
             tables = tables[:limit_tables]
+        cols_map = {t: cols_all.get(t, []) for t in tables}
 
         for table in tables:
             scanned += 1
-            # obter colunas de forma segura
-            try:
-                cur = conn.execute(f'SELECT * FROM "{table}" LIMIT 0')
-                cols = [c[0] for c in cur.description]
-            except Exception:
-                # pular tabelas problemáticas
-                continue
+            cols = cols_map.get(table, [])
 
             if not cols:
                 continue
 
             # construir WHERE: CAST(col AS VARCHAR) ILIKE ? para cada coluna
-            checks = [f'CAST("{c}" AS VARCHAR) ILIKE ?' for c in cols]
+            try:
+                checks = [f"CAST({quote_ident(c)} AS VARCHAR) ILIKE ?" for c in cols]
+            except ValueError:
+                continue
             params = [like_param] * len(cols)
             where_clause = " OR ".join(checks)
-            sql = f'SELECT * FROM "{table}" WHERE {where_clause}'
+            sql = f"SELECT * FROM {quote_ident(table)} WHERE {where_clause}"
             # se per_table > 0 aplicamos LIMIT
-            if per_table > 0:
-                sql += f" LIMIT {per_table}"
+            sql += f" LIMIT {per_table}"
 
             try:
                 rows = conn.execute(sql, params).fetchall()
@@ -216,7 +279,6 @@ def api_search():
                     "rows": rows_serial
                 }
 
-        conn.close()
         return jsonify({"q": q, "results": results, "scanned_tables": scanned})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-Teste completo da interface web MDB2SQL
-Valida: upload, selecao, conversao, indexacao e interface de usuario
+Teste completo da interface web MDB2SQL.
+Valida: upload, selecao, conversao, indexacao e interface de usuario.
 """
 
 import requests
-import json
 import time
-import os
 import sys
 from pathlib import Path
 
@@ -16,7 +14,7 @@ TEST_FILES_DIR = Path("tests/test_files")
 
 
 def setup_test_files():
-    """Prepara arquivos de teste se necessario"""
+    """Prepara arquivos de teste se necessario."""
     TEST_FILES_DIR.mkdir(exist_ok=True)
 
     # Criar arquivo DuckDB de teste se nao existir
@@ -76,7 +74,7 @@ def test_selecao_arquivo():
         # Listar arquivos disponiveis
         response = requests.get(f"{BASE_URL}/api/list_uploads", timeout=5)
         if response.status_code != 200:
-            print(f"ERRO: Nao conseguiu listar uploads")
+            print("ERRO: Nao conseguiu listar uploads")
             return False
 
         data = response.json()
@@ -122,7 +120,7 @@ def test_interface_pos_upload():
     print("\n=== TESTE INTERFACE POS UPLOAD ===")
 
     try:
-        # Verificar se arquivo está selecionado
+        # Verificar se arquivo esta selecionado
         response = requests.get(f"{BASE_URL}/api/health", timeout=5)
         if response.status_code == 200:
             data = response.json()
@@ -137,10 +135,10 @@ def test_interface_pos_upload():
                     count = data.get("count", 0)
                     print(f"Tabelas encontradas: {count}")
 
-                    # Verificar se é arquivo DuckDB (não deve mostrar conversão)
+                    # Verificar se e arquivo DuckDB (nao deve mostrar conversao)
                     if db_atual.endswith(".duckdb"):
                         print("OK: Arquivo DuckDB - sem area de conversao")
-                        # Verificar se não há indicadores de conversão ativa
+                        # Verificar se nao ha indicadores de conversao ativa
                         # (isso seria verificado via JavaScript na interface real)
                         return True
                     else:
@@ -153,7 +151,7 @@ def test_interface_pos_upload():
                 print("ERRO: Nenhum banco conectado")
                 return False
         else:
-            print(f"ERRO: Health check falhou")
+            print("ERRO: Health check falhou")
             return False
     except Exception as e:
         print(f"ERRO: {e}")
@@ -219,10 +217,10 @@ def test_interface_visual():
 
                 return True
             else:
-                print(f"ERRO: Interface admin nao acessivel")
+                print("ERRO: Interface admin nao acessivel")
                 return False
         else:
-            print(f"ERRO: Interface principal nao carregou")
+            print("ERRO: Interface principal nao carregou")
             return False
     except Exception as e:
         print(f"ERRO: {e}")
@@ -284,8 +282,8 @@ def main():
         if response.status_code != 200:
             print("ERRO: Servidor nao esta respondendo")
             return False
-    except:
-        print("ERRO: Nao conseguiu conectar ao servidor")
+    except Exception as e:
+        print(f"ERRO: Nao conseguiu conectar ao servidor: {e}")
         return False
 
     testes = [

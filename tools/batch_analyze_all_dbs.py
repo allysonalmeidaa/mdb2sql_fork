@@ -16,13 +16,10 @@ Destaques da atualização
 - Logs mais claros por arquivo (ok/erro)
 - Sem alterar a organização da saída do analyze (continua idêntica ao modo 1-banco)
 
-Uso:
-  python tools/batch_analyze_all_dbs.py ^
-    --db-dir "C:\\mdb2sql_fork\\import_folder\\Bancos atuais" ^
-    --table "RANGER_SOSTAT" ^
-    --outdir "C:\\mdb2sql_fork\\import_folder\\Analises" ^
-    --extensions .accdb .mdb .duckdb .sqlite .db ^
-    --top 50 --sample-size 5000 -v
+Uso (PowerShell):
+  python tools/batch_analyze_all_dbs.py --db-dir "./import_folder/bancos_atuais" --table "RANGER_SOSTAT" --outdir "./import_folder/analises" --extensions .accdb .mdb .duckdb .sqlite .db --top 50 --sample-size 5000 -v
+Uso (Bash/Zsh):
+  python tools/batch_analyze_all_dbs.py --db-dir "./import_folder/bancos_atuais" --table "RANGER_SOSTAT" --outdir "./import_folder/analises" --extensions .accdb .mdb .duckdb .sqlite .db --top 50 --sample-size 5000 -v
 """
 from pathlib import Path
 import argparse
@@ -91,19 +88,24 @@ def main():
     args = parse_args()
     db_dir = Path(args.db_dir)
     if not db_dir.exists():
-        print("Diretório não encontrado:", db_dir); return 1
-    outdir = Path(args.outdir); outdir.mkdir(parents=True, exist_ok=True)
+        print("Diretório não encontrado:", db_dir)
+        return 1
+    outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
     exts = [e if e.startswith('.') else '.'+e for e in args.extensions]
 
     files = gather_files(db_dir, exts)
     if not files:
-        print("Nenhum arquivo encontrado com as extensões fornecidas em", db_dir); return 1
+        print("Nenhum arquivo encontrado com as extensões fornecidas em", db_dir)
+        return 1
 
     analyze_script = Path(args.analyze_script)
     if not analyze_script.exists():
-        print("Script de análise não encontrado:", analyze_script); return 1
+        print("Script de análise não encontrado:", analyze_script)
+        return 1
 
-    total = len(files); failed = []
+    total = len(files)
+    failed = []
     print(f"Encontrados {total} arquivos. Iniciando processamento...\n")
     for idx, f in enumerate(files, start=1):
         engine = detect_engine_from_ext(f, args.engine_override)

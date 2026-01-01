@@ -9,13 +9,10 @@ build_global_report_from_analyses.py (atualizado: h1 menor + mesmos rótulos do 
 - "% do valor mais frequente (entre não nulos)" global = (contagem agregada do valor mais frequente) / (Σ linhas_nao_nulas) × 100
 - h1 com fonte menor (18pt), body em 14px
 
-Uso:
-  python tools/build_global_report_from_analyses.py ^
-    --analises "C:\\mdb2sql_fork\\import_folder\\analises2" ^
-    --out-csv "C:\\mdb2sql_fork\\import_folder\\analises2\\global_summary_by_column.csv" ^
-    --out-html "C:\\mdb2sql_fork\\import_folder\\analises2\\relatorio_global_RANGER_SOSTAT.html" ^
-    --out-db "C:\\mdb2sql_fork\\import_folder\\analises2\\global_freq_RANGER_SOSTAT.db" ^
-    --table "RANGER_SOSTAT" --top-n 50 --mode slim
+Uso (PowerShell):
+  python tools/build_global_report_from_analyses.py --analises "./import_folder/analises2" --out-csv "./import_folder/analises2/global_summary_by_column.csv" --out-html "./import_folder/analises2/relatorio_global_RANGER_SOSTAT.html" --out-db "./import_folder/analises2/global_freq_RANGER_SOSTAT.db" --table "RANGER_SOSTAT" --top-n 50 --mode slim
+Uso (Bash/Zsh):
+  python tools/build_global_report_from_analyses.py --analises "./import_folder/analises2" --out-csv "./import_folder/analises2/global_summary_by_column.csv" --out-html "./import_folder/analises2/relatorio_global_RANGER_SOSTAT.html" --out-db "./import_folder/analises2/global_freq_RANGER_SOSTAT.db" --table "RANGER_SOSTAT" --top-n 50 --mode slim
 """
 from pathlib import Path
 import argparse
@@ -148,8 +145,10 @@ def carregar_summaries(analises_dir: Path, table: str):
                 d['_list_mu'].append(mu_i)
                 d['_list_var'].append(var_i)
             # min/max globais
-            if pd.notna(r.get('min')): d['mins'].append(float(r.get('min')))
-            if pd.notna(r.get('max')): d['maxs'].append(float(r.get('max')))
+            if pd.notna(r.get('min')):
+                d['mins'].append(float(r.get('min')))
+            if pd.notna(r.get('max')):
+                d['maxs'].append(float(r.get('max')))
     return acc
 
 def agregar_estatisticas_numericas_precisas(acc_raw: dict):
@@ -159,7 +158,9 @@ def agregar_estatisticas_numericas_precisas(acc_raw: dict):
     agg = {}
     for col, d in acc_raw.items():
         tipo_mais = max(d['tipo_counts'].items(), key=lambda kv: kv[1])[0] if d['tipo_counts'] else ""
-        sum_linhas = d['sum_linhas']; sum_nulos = d['sum_nulos']; sum_nao_nulos = d['sum_nao_nulos']
+        sum_linhas = d['sum_linhas']
+        sum_nulos = d['sum_nulos']
+        sum_nao_nulos = d['sum_nao_nulos']
         nulos_pct_global = (sum_nulos / sum_linhas * 100.0) if sum_linhas > 0 else 0.0
 
         n_list = d.get('_list_n', [])
@@ -251,9 +252,11 @@ def construir_dataframe_global(df_global_counts: pd.DataFrame, agg_num: dict):
                 top1_val = str(g_sorted.iloc[0]['valor'])
                 top1_cnt_total = int(g_sorted.iloc[0]['count_total'])
             else:
-                top1_val = ""; top1_cnt_total = 0
+                top1_val = ""
+                top1_cnt_total = 0
         else:
-            top1_val = ""; top1_cnt_total = 0
+            top1_val = ""
+            top1_cnt_total = 0
 
         nao_nulos_sum = float(nao_nulos_por_col.get(col, 0.0) or 0.0)
         pct_valor_mais_freq = (top1_cnt_total / nao_nulos_sum * 100.0) if nao_nulos_sum > 0 else 0.0
@@ -342,9 +345,12 @@ def build_table_html(summary_df: pd.DataFrame, mode:str):
     ser = summary_df['pct_valor_mais_freq_nao_nulos_global'] if 'pct_valor_mais_freq_nao_nulos_global' in summary_df.columns else None
     for i in range(len(summary_df)):
         v = float(ser.iloc[i]) if ser is not None and pd.notna(ser.iloc[i]) else 0.0
-        if v >= 10.0: fill_colors.append('#dff0d8')
-        elif v >= 2.0: fill_colors.append('#fff7bf')
-        else: fill_colors.append('#ffffff')
+        if v >= 10.0:
+            fill_colors.append('#dff0d8')
+        elif v >= 2.0:
+            fill_colors.append('#fff7bf')
+        else:
+            fill_colors.append('#ffffff')
     table_fig = go.Figure(go.Table(
         header=dict(values=headers, fill_color='lightgrey', align='left'),
         cells=dict(values=values, fill_color=[fill_colors], align='left', font_size=12)
@@ -416,7 +422,8 @@ def main():
     args = parse_args()
     analises_dir = Path(args.analises)
     if not analises_dir.exists():
-        print("Diretório de análises não encontrado:", analises_dir); return 1
+        print("Diretório de análises não encontrado:", analises_dir)
+        return 1
 
     # 1) Agregar top-values (contagens globais por valor)
     df_global_counts, folder_ids, map_top1 = agregar_top_values(analises_dir, args.table)
@@ -424,7 +431,8 @@ def main():
     # 2) Agregar summaries por coluna (cobertura + números)
     acc_raw = carregar_summaries(analises_dir, args.table)
     if not acc_raw:
-        print("Nenhum summary_by_column.csv encontrado para a tabela informada."); return 1
+        print("Nenhum summary_by_column.csv encontrado para a tabela informada.")
+        return 1
     agg_dict = agregar_estatisticas_numericas_precisas(acc_raw)
 
     # 3) Construir dataframe global final

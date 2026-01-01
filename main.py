@@ -2,8 +2,8 @@
 """
 MDB2SQL - Interface Dev Test
 
-Script para testar a versão de desenvolvimento da interface Flask com melhorias.
-Ultima modificacao: 2025-12-29T14:30:00
+Script para testar a versao de desenvolvimento da interface Flask com melhorias.
+Ultima modificacao: 2025-12-31T22:10:00
 """
 
 import os
@@ -15,17 +15,24 @@ from datetime import datetime
 
 
 def verificar_porta_disponivel(host, porta):
-    """Verifica se a porta está disponível para uso."""
+    """Verifica se a porta esta disponivel para uso."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            resultado = s.connect_ex((host, porta))
-            return resultado != 0
-    except socket.error:
+            s.bind((host, porta))
+        return True
+    except OSError:
         return False
 
 
-def validar_configuracao(args):
-    """Valida a configuração antes de iniciar o servidor."""
+def resolve_upload_folder(upload_folder, base_dir):
+    """Resolve o caminho da pasta de uploads."""
+    if upload_folder:
+        return Path(upload_folder).expanduser().resolve(strict=False)
+    return (base_dir / "interface" / "uploads").resolve(strict=False)
+
+
+def validar_configuracao(args, upload_dir):
+    """Valida a configuracao antes de iniciar o servidor."""
     erros = []
 
     # Validar porta
@@ -33,17 +40,19 @@ def validar_configuracao(args):
         erros.append(f"Porta invalida: {args.port}. Deve estar entre 1 e 65535")
 
     # Validar pasta de uploads
-    if args.upload_folder:
-        upload_path = Path(args.upload_folder)
-        if not upload_path.exists():
+    if upload_dir:
+        if upload_dir.exists():
+            if not upload_dir.is_dir():
+                erros.append(f"Caminho nao e uma pasta: {upload_dir}")
+        else:
             try:
-                upload_path.mkdir(parents=True, exist_ok=True)
+                upload_dir.mkdir(parents=True, exist_ok=True)
             except PermissionError:
-                erros.append(f"Sem permissao para criar pasta: {args.upload_folder}")
-        elif not upload_path.is_dir():
-            erros.append(f"Caminho nao e uma pasta: {args.upload_folder}")
+                erros.append(f"Sem permissao para criar pasta: {upload_dir}")
+            except OSError as exc:
+                erros.append(f"Erro ao criar pasta: {upload_dir} ({exc})")
 
-    # Validar tamanho máximo
+    # Validar tamanho maximo
     if args.max_content_length <= 0:
         erros.append("Tamanho maximo de upload deve ser maior que zero")
 
@@ -66,9 +75,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemplos de uso:
-  python main_dev.py                    # Executar versao dev na porta 5001
-  python main_dev.py --port 5002        # Usar porta diferente
-  python main_dev.py --debug            # Modo debug completo
+  python main.py                    # Executar versao dev na porta 5001
+  python main.py --port 5002        # Usar porta diferente
+  python main.py --debug            # Modo debug completo
         """,
     )
 
@@ -92,11 +101,19 @@ Exemplos de uso:
         default=500 * 1024 * 1024,
         help="Tamanho maximo de upload em bytes (padrao: 500MB)",
     )
-    parser.add_argument(
+    thread_group = parser.add_mutually_exclusive_group()
+    thread_group.add_argument(
         "--threaded",
+        dest="threaded",
         action="store_true",
         default=True,
         help="Usar threads para melhor desempenho (padrao: ativado)",
+    )
+    thread_group.add_argument(
+        "--no-threaded",
+        dest="threaded",
+        action="store_false",
+        help="Desativar threads (padrao: ativado)",
     )
 
     args = parser.parse_args()
@@ -104,8 +121,12 @@ Exemplos de uso:
     # Gerar timestamp unico para esta execucao
     timestamp_exec = datetime.now().isoformat()
 
+    # Resolver pasta de uploads
+    script_dir = Path(__file__).parent.absolute()
+    upload_dir = resolve_upload_folder(args.upload_folder, script_dir)
+
     # Validar configuracao
-    erros = validar_configuracao(args)
+    erros = validar_configuracao(args, upload_dir)
     if erros:
         print(f"{timestamp_exec} - MDB2SQL - Interface Dev Test")
         print("Erros de configuracao:")
@@ -113,7 +134,7 @@ Exemplos de uso:
             print(f"  - {erro}")
         sys.exit(1)
 
-    # Verificar se a porta está disponivel
+    # Verificar se a porta esta disponivel
     if not verificar_porta_disponivel(args.host, args.port):
         print(f"{timestamp_exec} - MDB2SQL - Interface Dev Test")
         print(f"Erro: Porta {args.port} ja esta em uso no host {args.host}")
@@ -124,8 +145,7 @@ Exemplos de uso:
     os.environ["FLASK_PORT"] = str(args.port)
     os.environ["FLASK_DEBUG"] = str(args.debug)
 
-    if args.upload_folder:
-        os.environ["UPLOAD_FOLDER"] = args.upload_folder
+    os.environ["UPLOAD_FOLDER"] = str(upload_dir)
 
     os.environ["MAX_CONTENT_LENGTH"] = str(args.max_content_length)
 
@@ -133,7 +153,6 @@ Exemplos de uso:
     configurar_logging()
 
     # Adicionar diretorio raiz ao path
-    script_dir = Path(__file__).parent.absolute()
     sys.path.insert(0, str(script_dir))
 
     # Importar e executar o app Flask
@@ -141,8 +160,8 @@ Exemplos de uso:
         from interface.app_flask_local_search import app
 
         print(f"{timestamp_exec} - MDB2SQL - Interface Dev Test")
-        print(f"Iniciando servidor Flask")
-        print(f"Pasta de uploads: {args.upload_folder or 'interface/uploads'}")
+        print("Iniciando servidor Flask")
+        print(f"Pasta de uploads: {upload_dir}")
         print(f"Servidor: http://{args.host}:{args.port}")
         print(f"Debug: {'Ativado' if args.debug else 'Desativado'}")
         print(f"Modo threaded: {'Ativado' if args.threaded else 'Desativado'}")

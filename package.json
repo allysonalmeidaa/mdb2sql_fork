@@ -1,0 +1,16 @@
+{
+  "name": "mdb2sql",
+  "private": true,
+  "version": "0.0.0",
+  "description": "MDB2SQL tooling",
+  "devDependencies": {
+    "@playwright/test": "^1.50.1",
+    "eslint": "^8.57.1",
+    "prelude-ls": "^1.2.1"
+  },
+  "scripts": {
+    "lint:js": "eslint static/ui_utils.js",
+    "check:ui": "python tools/ui_smoke_check.py",
+    "test:ui": "playwright test"
+  }
+}
