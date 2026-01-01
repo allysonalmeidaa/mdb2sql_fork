@@ -1,3 +1,5 @@
+import gzip
+import json
 import unittest
 
 import interface.app_flask_local_search as app_module
@@ -20,7 +22,10 @@ class AdminListUploadsTests(unittest.TestCase):
     def test_admin_list_uploads_has_metadata(self):
         resp = self.client.get("/admin/list_uploads")
         self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
+        data_bytes = resp.data
+        if resp.headers.get("Content-Encoding") == "gzip":
+            data_bytes = gzip.decompress(data_bytes)
+        data = json.loads(data_bytes.decode("utf-8"))
         self.assertIsInstance(data, dict)
         uploads = data.get("uploads", [])
         self.assertIsInstance(uploads, list)

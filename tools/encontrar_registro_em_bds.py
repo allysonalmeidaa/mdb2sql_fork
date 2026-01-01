@@ -10,6 +10,7 @@ na saida (como [ERRO]) e na coluna 'error' do CSV.
 Uso geral: veja os exemplos e a documentacao em docs/USO-encontrar_registro_em_bds.md
 (assume-se que agora o modo composto usa --filters; nao ha atalhos --rtuno/--pntno).
 """
+
 from pathlib import Path
 import argparse
 import sys
@@ -110,6 +111,7 @@ def quick_sha1(path, nbytes=65536):
     except Exception:
         return None
 
+
 # ---------- parsing de --filters ----------
 def parse_filters_string(s: str):
     """
@@ -127,7 +129,7 @@ def parse_filters_string(s: str):
         col, val = token.split("=", 1)
         col = col.strip()
         val = val.strip()
-        if (val.startswith("\"") and val.endswith("\"")) or (
+        if (val.startswith('"') and val.endswith('"')) or (
             val.startswith("'") and val.endswith("'")
         ):
             val = val[1:-1]
@@ -197,8 +199,8 @@ def listar_tabelas_access(path):
         raise RuntimeError("pyodbc nao esta instalado")
     conn = None
     conn_strs = [
-        fr"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={path};",
-        fr"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={path};",
+        rf"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={path};",
+        rf"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={path};",
     ]
     last_err = None
     for cs in conn_strs:
@@ -209,7 +211,9 @@ def listar_tabelas_access(path):
             last_err = exc
             conn = None
     if conn is None:
-        raise last_err
+        if last_err is not None:
+            raise last_err
+        raise RuntimeError("Falha ao conectar via ODBC")
     try:
         cur = conn.cursor()
         tables = []
@@ -233,8 +237,8 @@ def colunas_tabela_access(path, tabela):
         raise RuntimeError("pyodbc nao esta instalado")
     conn = None
     conn_strs = [
-        fr"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={path};",
-        fr"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={path};",
+        rf"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={path};",
+        rf"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={path};",
     ]
     last_err = None
     for cs in conn_strs:
@@ -245,7 +249,9 @@ def colunas_tabela_access(path, tabela):
             last_err = exc
             conn = None
     if conn is None:
-        raise last_err
+        if last_err is not None:
+            raise last_err
+        raise RuntimeError("Falha ao conectar via ODBC")
     try:
         cols = []
         cur = conn.cursor()
@@ -266,6 +272,7 @@ def colunas_tabela_access(path, tabela):
             conn.close()
         except Exception:
             pass
+
 
 # ---------- construir SQL WHERE e placeholders por engine ----------
 def build_where_clause_and_params(engine: str, filters):
@@ -308,23 +315,27 @@ def checar_com_filtros(path, engine, tabela, filters, sample, show_cols):
                     row = conn.execute(sql_sample, params).fetchone()
                 except Exception:
                     try:
-                        cnt = conn.execute(
+                        cnt_row = conn.execute(
                             f'SELECT COUNT(*) FROM "{tabela}" WHERE {where_sql}',
                             params,
-                        ).fetchone()[0]
+                        ).fetchone()
+                        cnt = cnt_row[0] if cnt_row else 0
                         return int(cnt), None, None
                     except Exception as exc:
                         return 0, None, str(exc)
                 if row:
                     cols_all = [
                         c[0]
-                        for c in conn.execute(f'SELECT * FROM "{tabela}" LIMIT 0').description
+                        for c in conn.execute(
+                            f'SELECT * FROM "{tabela}" LIMIT 0'
+                        ).description
                     ]
                     obj = _row_to_sample(cols_all, row, show_cols)
                     return 1, obj if sample else {}, None
-                cnt = conn.execute(
+                cnt_row = conn.execute(
                     f'SELECT COUNT(*) FROM "{tabela}" WHERE {where_sql}', params
-                ).fetchone()[0]
+                ).fetchone()
+                cnt = cnt_row[0] if cnt_row else 0
                 return int(cnt), None, None
             finally:
                 conn.close()
@@ -345,13 +356,16 @@ def checar_com_filtros(path, engine, tabela, filters, sample, show_cols):
                             f'SELECT COUNT(*) FROM "{tabela}" WHERE {where_sql}',
                             tuple(params),
                         )
-                        return int(cur.fetchone()[0]), None, None
+                        cnt_row = cur.fetchone()
+                        return int(cnt_row[0] if cnt_row else 0), None, None
                     except Exception as exc:
                         return 0, None, str(exc)
                 if row:
                     cols_all = [
                         d[0]
-                        for d in cur.execute(f'SELECT * FROM "{tabela}" LIMIT 0').description
+                        for d in cur.execute(
+                            f'SELECT * FROM "{tabela}" LIMIT 0'
+                        ).description
                     ]
                     obj = _row_to_sample(cols_all, row, show_cols)
                     return 1, obj if sample else {}, None
@@ -359,7 +373,8 @@ def checar_com_filtros(path, engine, tabela, filters, sample, show_cols):
                     f'SELECT COUNT(*) FROM "{tabela}" WHERE {where_sql}',
                     tuple(params),
                 )
-                return int(cur.fetchone()[0]), None, None
+                cnt_row = cur.fetchone()
+                return int(cnt_row[0] if cnt_row else 0), None, None
             finally:
                 conn.close()
 
@@ -368,8 +383,8 @@ def checar_com_filtros(path, engine, tabela, filters, sample, show_cols):
                 return 0, None, "pyodbc nao esta instalado"
             conn = None
             conn_strs = [
-                fr"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={str(path)};",
-                fr"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={str(path)};",
+                rf"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={str(path)};",
+                rf"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={str(path)};",
             ]
             last_err = None
             for cs in conn_strs:
@@ -398,7 +413,9 @@ def checar_com_filtros(path, engine, tabela, filters, sample, show_cols):
                     except Exception as exc:
                         return 0, None, str(exc)
                 if row:
-                    cols_all = [d[0] for d in cur.description] if cur.description else []
+                    cols_all = (
+                        [d[0] for d in cur.description] if cur.description else []
+                    )
                     obj = _row_to_sample(cols_all, row, show_cols)
                     return 1, obj if sample else {}, None
                 try:
@@ -419,6 +436,7 @@ def checar_com_filtros(path, engine, tabela, filters, sample, show_cols):
         return 0, None, "engine nao suportada"
     except Exception as exc:
         return 0, None, str(exc)
+
 
 # ---------- busca generica por chave ----------
 def buscar_generico_em_tabela(
@@ -480,7 +498,9 @@ def buscar_generico_em_tabela(
                 if row:
                     cols = [
                         c[0]
-                        for c in conn.execute(f'SELECT * FROM "{tabela}" LIMIT 0').description
+                        for c in conn.execute(
+                            f'SELECT * FROM "{tabela}" LIMIT 0'
+                        ).description
                     ]
                     obj = _row_to_sample(cols, row, show_cols)
                     return True, col, obj if sample else {}
@@ -504,7 +524,9 @@ def buscar_generico_em_tabela(
                 if row:
                     cols = [
                         d[0]
-                        for d in cur.execute(f'SELECT * FROM "{tabela}" LIMIT 0').description
+                        for d in cur.execute(
+                            f'SELECT * FROM "{tabela}" LIMIT 0'
+                        ).description
                     ]
                     obj = _row_to_sample(cols, row, show_cols)
                     return True, col, obj if sample else {}
@@ -517,8 +539,8 @@ def buscar_generico_em_tabela(
             return False, None, None
         conn = None
         conn_strs = [
-            fr"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={str(path)};",
-            fr"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={str(path)};",
+            rf"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={str(path)};",
+            rf"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={str(path)};",
         ]
         for cs in conn_strs:
             try:
@@ -551,6 +573,7 @@ def buscar_generico_em_tabela(
         return False, None, None
 
     return False, None, None
+
 
 # ---------- analise de CSV (funcao integrada) ----------
 def analyze_csv_file(path_csv):
@@ -591,7 +614,9 @@ def analyze_csv_file(path_csv):
         print("  ultimo presente:", rows_sorted[last_i]["path"])
         print("  primeiro ausente apos isso:", rows_sorted[disappeared_at]["path"])
     else:
-        print("Registro presente na ultima base escaneada (nenhum desaparecimento detectado).")
+        print(
+            "Registro presente na ultima base escaneada (nenhum desaparecimento detectado)."
+        )
 
 
 # ---------- fluxo principal (scan) ----------
@@ -679,7 +704,9 @@ def scan_and_optionally_save(diretorio: Path, args):
                     for tabela in tabelas_to_try:
                         try:
                             if ext in (".duckdb", ".db"):
-                                cols = [c.lower() for c in colunas_tabela_duckdb(f, tabela)]
+                                cols = [
+                                    c.lower() for c in colunas_tabela_duckdb(f, tabela)
+                                ]
                             elif ext in (".sqlite", ".sqlite3"):
                                 cols = [
                                     c.lower() for c in colunas_tabela_sqlite(f, tabela)
@@ -982,6 +1009,7 @@ def scan_and_optionally_save(diretorio: Path, args):
             print("Falha ao salvar CSV:", exc)
     return args.out_csv if args.out_csv else None
 
+
 # ---------- CLI ----------
 def parse_args():
     p = argparse.ArgumentParser(
@@ -991,8 +1019,12 @@ def parse_args():
         )
     )
     p.add_argument("--dir", "-d", help="Diretorio contendo os arquivos de BD")
-    p.add_argument("--key", "-k", help="(modo generico) Valor da chave a buscar (string).")
-    p.add_argument("--col", "-c", help="(modo generico) Nome da coluna da chave (se souber).")
+    p.add_argument(
+        "--key", "-k", help="(modo generico) Valor da chave a buscar (string)."
+    )
+    p.add_argument(
+        "--col", "-c", help="(modo generico) Nome da coluna da chave (se souber)."
+    )
     p.add_argument("--table", "-t", help="Nome (ou substring) da tabela a procurar.")
     p.add_argument(
         "--ext",
@@ -1005,7 +1037,9 @@ def parse_args():
         action="store_true",
         help="(modo generico) tentar todas as colunas se necessario.",
     )
-    p.add_argument("--sample", action="store_true", help="Mostrar uma amostra da linha encontrada.")
+    p.add_argument(
+        "--sample", action="store_true", help="Mostrar uma amostra da linha encontrada."
+    )
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose")
     p.add_argument(
         "--order",

@@ -1,7 +1,12 @@
 import duckdb
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parents[1] / 'interface' / 'uploads' / '2025-11-05_DB4.duckdb'
+DB_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "interface"
+    / "uploads"
+    / "2025-11-05_DB4.duckdb"
+)
 
 con = duckdb.connect(str(DB_PATH))
 

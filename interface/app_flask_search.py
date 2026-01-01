@@ -22,16 +22,20 @@ _METADATA_CACHE = {"ts": 0.0, "tables": [], "columns": {}, "db_path": None}
 
 app = Flask(__name__, static_folder=str(PROJECT_ROOT / "static"), static_url_path="")
 
+
 def connect_db():
     try:
         db_file = resolve_db_path(uploads_dir=UPLOAD_DIR)
     except ValueError as exc:
         raise FileNotFoundError(str(exc)) from exc
     if not db_file:
-        raise FileNotFoundError("DB_PATH not set and no .duckdb found in interface/uploads")
+        raise FileNotFoundError(
+            "DB_PATH not set and no .duckdb found in interface/uploads"
+        )
     if not db_file.exists():
         raise FileNotFoundError(f"DuckDB file not found: {db_file}")
     return duckdb.connect(str(db_file)), db_file
+
 
 def get_conn():
     conn = getattr(g, "_duckdb_conn", None)
@@ -41,14 +45,17 @@ def get_conn():
         g._duckdb_path = str(db_file)
     return conn
 
+
 def get_db_path():
     return getattr(g, "_duckdb_path", None)
+
 
 @app.teardown_appcontext
 def close_conn(exception):
     conn = g.pop("_duckdb_conn", None)
     if conn is not None:
         conn.close()
+
 
 def quote_ident(name):
     if not isinstance(name, str) or not name:
@@ -57,9 +64,11 @@ def quote_ident(name):
         raise ValueError("Invalid identifier")
     return '"' + name.replace('"', '""') + '"'
 
+
 def list_tables(conn):
     rows = conn.execute("SHOW TABLES").fetchall()
     return [r[0] for r in rows]
+
 
 def get_columns_map(conn, tables=None):
     rows = conn.execute(
@@ -72,6 +81,7 @@ def get_columns_map(conn, tables=None):
             continue
         cols_by_table.setdefault(table_name, []).append(column_name)
     return cols_by_table
+
 
 def get_metadata(conn, tables=None):
     db_path = get_db_path()
@@ -98,6 +108,7 @@ def get_metadata(conn, tables=None):
     filtered_cols = {t: cols_map.get(t, []) for t in filtered_tables}
     return filtered_tables, filtered_cols
 
+
 def serialize_value(v):
     """Converte tipos não-serializáveis para representação JSON-friendly."""
     if v is None:
@@ -108,7 +119,7 @@ def serialize_value(v):
         return float(v)
     if isinstance(v, (bytes, bytearray)):
         try:
-            return v.decode('utf-8', errors='replace')
+            return v.decode("utf-8", errors="replace")
         except Exception:
             return repr(v)
     try:
@@ -118,9 +129,11 @@ def serialize_value(v):
         pass
     return str(v)
 
+
 @app.route("/")
 def index():
     return app.send_static_file("index.html")
+
 
 @app.route("/api/tables", methods=["GET"])
 def api_tables():
@@ -130,6 +143,7 @@ def api_tables():
         return jsonify({"tables": tables})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/table", methods=["GET"])
 def api_table():
@@ -144,7 +158,9 @@ def api_table():
     table = request.args.get("name")
     if not table:
         return jsonify({"error": "table name required (?name=TABLE_NAME)"}), 400
-    limit = clamp_int(request.args.get("limit", 50), 50, min_value=0, max_value=MAX_LIMIT)
+    limit = clamp_int(
+        request.args.get("limit", 50), 50, min_value=0, max_value=MAX_LIMIT
+    )
     offset = clamp_int(request.args.get("offset", 0), 0, min_value=0)
     if limit == 0:
         limit = MAX_LIMIT
@@ -198,15 +214,18 @@ def api_table():
         # serializar rows
         rows_serial = [[serialize_value(v) for v in row] for row in rows]
 
-        return jsonify({
-            "columns": cols,
-            "rows": rows_serial,
-            "total": total,
-            "limit": limit,
-            "offset": offset
-        })
+        return jsonify(
+            {
+                "columns": cols,
+                "rows": rows_serial,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/search", methods=["GET"])
 def api_search():
@@ -224,15 +243,21 @@ def api_search():
     if not q:
         return jsonify({"error": "query parameter 'q' required"}), 400
 
-    per_table = clamp_int(request.args.get("per_table", 25), 25, min_value=0, max_value=MAX_PER_TABLE)
-    limit_tables = clamp_int(request.args.get("limit_tables", 100), 100, min_value=0, max_value=MAX_TABLES)
+    per_table = clamp_int(
+        request.args.get("per_table", 25), 25, min_value=0, max_value=MAX_PER_TABLE
+    )
+    limit_tables = clamp_int(
+        request.args.get("limit_tables", 100), 100, min_value=0, max_value=MAX_TABLES
+    )
     if per_table == 0:
         per_table = MAX_PER_TABLE
     if limit_tables == 0:
         limit_tables = MAX_TABLES
 
     tables_param = request.args.get("tables")
-    requested_tables = [t.strip() for t in tables_param.split(",")] if tables_param else None
+    requested_tables = (
+        [t.strip() for t in tables_param.split(",")] if tables_param else None
+    )
     like_param = f"%{q}%"
 
     results = {}
@@ -241,7 +266,9 @@ def api_search():
         conn = get_conn()
         all_tables, cols_all = get_metadata(conn)
         # opcional: filtrar apenas nas tabelas requisitadas
-        tables = [t for t in all_tables if (requested_tables is None or t in requested_tables)]
+        tables = [
+            t for t in all_tables if (requested_tables is None or t in requested_tables)
+        ]
         # limitar tabelas escaneadas: se limit_tables == 0 => sem limite
         if limit_tables > 0:
             tables = tables[:limit_tables]
@@ -274,14 +301,12 @@ def api_search():
             if rows:
                 # serializar linhas
                 rows_serial = [[serialize_value(v) for v in row] for row in rows]
-                results[table] = {
-                    "columns": cols,
-                    "rows": rows_serial
-                }
+                results[table] = {"columns": cols, "rows": rows_serial}
 
         return jsonify({"q": q, "results": results, "scanned_tables": scanned})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     # Dev server

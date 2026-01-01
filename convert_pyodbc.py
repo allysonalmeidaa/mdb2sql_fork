@@ -2,7 +2,7 @@
 
 import argparse
 import duckdb
-import pypyodbc
+import pypyodbc  # type: ignore[import-not-found]
 import re
 import sys
 from pathlib import Path
@@ -12,10 +12,10 @@ from typing import Optional, List
 
 def extract_date_from_filename(filename: str) -> Optional[str]:
     patterns = [
-        r'(\d{2})[_-](\d{2})[_-](\d{4})',
-        r'(\d{4})[_-](\d{2})[_-](\d{2})',
-        r'(\d{2})(\d{2})(\d{4})',
-        r'(\d{4})(\d{2})(\d{2})',
+        r"(\d{2})[_-](\d{2})[_-](\d{4})",
+        r"(\d{4})[_-](\d{2})[_-](\d{2})",
+        r"(\d{2})(\d{2})(\d{4})",
+        r"(\d{4})(\d{2})(\d{2})",
     ]
 
     for pattern in patterns:
@@ -33,8 +33,8 @@ def extract_date_from_filename(filename: str) -> Optional[str]:
 def get_mdb_connection(mdb_file: Path):
     try:
         conn_str = (
-            r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};'
-            f'DBQ={mdb_file.absolute()};'
+            r"Driver={Microsoft Access Driver (*.mdb, *.accdb)};"
+            f"DBQ={mdb_file.absolute()};"
         )
         return pypyodbc.connect(conn_str)
     except pypyodbc.Error as e:
@@ -50,12 +50,12 @@ def get_mdb_connection(mdb_file: Path):
 def get_mdb_tables(mdb_file: Path) -> List[str]:
     conn = get_mdb_connection(mdb_file)
     cursor = conn.cursor()
-    
+
     tables = []
     for row in cursor.tables():
-        if row.table_type == 'TABLE':
+        if row.table_type == "TABLE":
             tables.append(row.table_name)
-    
+
     cursor.close()
     conn.close()
     return tables
@@ -65,27 +65,27 @@ def export_table_to_csv(mdb_file: Path, table_name: str, output_csv: Path) -> bo
     try:
         conn = get_mdb_connection(mdb_file)
         cursor = conn.cursor()
-        
-        cursor.execute(f'SELECT * FROM [{table_name}]')
-        
+
+        cursor.execute(f"SELECT * FROM [{table_name}]")
+
         columns = [desc[0] for desc in cursor.description]
-        
-        with open(output_csv, 'w', encoding='utf-8') as f:
-            f.write(','.join(f'"{col}"' for col in columns) + '\n')
-            
+
+        with open(output_csv, "w", encoding="utf-8") as f:
+            f.write(",".join(f'"{col}"' for col in columns) + "\n")
+
             for row in cursor:
                 values = []
                 for value in row:
                     if value is None:
-                        values.append('')
+                        values.append("")
                     else:
                         str_val = str(value).replace('"', '""')
-                        if ',' in str_val or '"' in str_val or '\n' in str_val:
+                        if "," in str_val or '"' in str_val or "\n" in str_val:
                             values.append(f'"{str_val}"')
                         else:
                             values.append(str_val)
-                f.write(','.join(values) + '\n')
-        
+                f.write(",".join(values) + "\n")
+
         cursor.close()
         conn.close()
         return True
@@ -95,9 +95,7 @@ def export_table_to_csv(mdb_file: Path, table_name: str, output_csv: Path) -> bo
 
 
 def import_to_duckdb(
-    mdb_file: Path,
-    duckdb_file: Path,
-    file_date: Optional[str] = None
+    mdb_file: Path, duckdb_file: Path, file_date: Optional[str] = None
 ):
     print(f"\nProcessing: {mdb_file.name}")
 
@@ -106,7 +104,7 @@ def import_to_duckdb(
 
     if not file_date:
         print(f"WARNING: Could not extract date from {mdb_file.name}")
-        file_date = datetime.now().strftime('%Y-%m-%d')
+        file_date = datetime.now().strftime("%Y-%m-%d")
 
     print(f"Date extracted: {file_date}")
 
@@ -133,11 +131,11 @@ def import_to_duckdb(
     conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_import_id START 1")
 
     import_timestamp = datetime.now()
-    temp_dir = Path('/tmp/mdb2sql')
+    temp_dir = Path("/tmp/mdb2sql")
     temp_dir.mkdir(exist_ok=True)
 
     for table in tables:
-        print(f"  Importing: {table}...", end=' ', flush=True)
+        print(f"  Importing: {table}...", end=" ", flush=True)
 
         csv_file = temp_dir / f"{table}.csv"
 
@@ -162,14 +160,25 @@ def import_to_duckdb(
                 )
             """)
 
-            result = conn.execute(f'SELECT COUNT(*) FROM "{table_with_date}"').fetchone()
+            result = conn.execute(
+                f'SELECT COUNT(*) FROM "{table_with_date}"'
+            ).fetchone()
             row_count = result[0] if result else 0
 
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO _metadata
                 (import_id, source_file, file_date, import_timestamp, table_name, row_count)
                 VALUES (nextval('seq_import_id'), ?, ?, ?, ?, ?)
-            """, [mdb_file.name, file_date, import_timestamp, table_with_date, row_count])
+            """,
+                [
+                    mdb_file.name,
+                    file_date,
+                    import_timestamp,
+                    table_with_date,
+                    row_count,
+                ],
+            )
 
             print(f"OK ({row_count} rows)")
 
@@ -183,40 +192,38 @@ def import_to_duckdb(
 
 
 def batch_import(input_dir: Path, duckdb_file: Path):
-    mdb_files = sorted(list(input_dir.glob('*.mdb')) + list(input_dir.glob('*.accdb')))
+    mdb_files = sorted(list(input_dir.glob("*.mdb")) + list(input_dir.glob("*.accdb")))
 
     if not mdb_files:
         print(f"No MDB/ACCDB files found in {input_dir}")
         return
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Found {len(mdb_files)} files to process")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     for i, mdb_file in enumerate(mdb_files, 1):
-        print(f"\n[{i}/{len(mdb_files)}]", end=' ')
+        print(f"\n[{i}/{len(mdb_files)}]", end=" ")
         import_to_duckdb(mdb_file, duckdb_file)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert MDB/ACCDB to DuckDB using pypyodbc (requires ODBC driver)'
+        description="Convert MDB/ACCDB to DuckDB using pypyodbc (requires ODBC driver)"
     )
     parser.add_argument(
-        '--input',
+        "--input", type=Path, help="Input MDB/ACCDB file or directory for batch"
+    )
+    parser.add_argument(
+        "--output",
         type=Path,
-        help='Input MDB/ACCDB file or directory for batch'
+        default=Path("database.duckdb"),
+        help="Output DuckDB file (default: database.duckdb)",
     )
     parser.add_argument(
-        '--output',
-        type=Path,
-        default=Path('database.duckdb'),
-        help='Output DuckDB file (default: database.duckdb)'
-    )
-    parser.add_argument(
-        '--batch',
-        action='store_true',
-        help='Process all MDB/ACCDB files in --input directory'
+        "--batch",
+        action="store_true",
+        help="Process all MDB/ACCDB files in --input directory",
     )
 
     args = parser.parse_args()
@@ -241,5 +248,5 @@ def main():
         import_to_duckdb(args.input, args.output)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

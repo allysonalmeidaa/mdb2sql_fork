@@ -169,18 +169,27 @@ Veja `tools/README.md` para scripts de analise e relatorios.
 
 PowerShell:
 ```
+python -m pytest
 python -m unittest discover -s tests
+python -m flake8
 python -m ruff check interface tools tests
 ```
 
 Bash:
 ```
+python -m pytest
 python -m unittest discover -s tests
+python -m flake8
 python -m ruff check interface tools tests
 ```
 
 Zsh:
 ```
+python -m pytest
 python -m unittest discover -s tests
+python -m flake8
 python -m ruff check interface tools tests
 ```
+
+Notas:
+- `.flake8` exclui node_modules e ignora E302/E303/E501 para reduzir ruido.

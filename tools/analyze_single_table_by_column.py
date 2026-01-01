@@ -45,6 +45,7 @@ Uso (exemplo - PowerShell):
 Uso (exemplo - Bash/Zsh):
   python tools/analyze_single_table_by_column.py --db "./import_folder/bancos_atuais/2025-11-05_DB4.accdb" --table "RANGER_SOSTAT" --engine access --outdir "./import_folder/analises" --top 50 -v
 """
+
 from pathlib import Path
 import argparse
 import csv
@@ -70,7 +71,9 @@ try:
 except Exception:
     pyodbc = None
 
-# ---------------- estatística (Welford) ----------------
+# ---------------- estatistica (Welford) ----------------
+
+
 class Welford:
     def __init__(self):
         self.n = 0
@@ -78,6 +81,7 @@ class Welford:
         self.M2 = 0.0
         self.min = None
         self.max = None
+
     def add(self, x):
         if x is None or (isinstance(x, float) and math.isnan(x)):
             return
@@ -90,20 +94,26 @@ class Welford:
         self.mean += d / self.n
         d2 = x - self.mean
         self.M2 += d * d2
+
     def var_pop(self):
         return (self.M2 / self.n) if self.n > 0 else 0.0
+
     def std_pop(self):
         return math.sqrt(self.var_pop()) if self.n > 0 else 0.0
+
     def var_sample(self):
         return (self.M2 / (self.n - 1)) if self.n > 1 else 0.0
+
     def std_sample(self):
         return math.sqrt(self.var_sample()) if self.n > 1 else 0.0
+
 
 class ReservoirSampler:
     def __init__(self, k):
         self.k = int(k)
         self.n = 0
         self.sample = []
+
     def add(self, x):
         self.n += 1
         if len(self.sample) < self.k:
@@ -111,13 +121,16 @@ class ReservoirSampler:
         else:
             i = random.randint(1, self.n)
             if i <= self.k:
-                self.sample[i-1] = x
+                self.sample[i - 1] = x
+
     def get_sample(self):
         return self.sample
 
-# ---------------- normalização/conversão de valores ----------------
+
+# ---------------- normalizacao/conversao de valores ----------------
 _DECIMAL_RE = re.compile(r"""^\s*Decimal\(\s*'(?P<num>[^']+)'\s*\)\s*$""")
 _TUPLE_ONE_RE = re.compile(r"""^\s*\(\s*'?(?P<inner>[^']+?)'?\s*,\s*\)\s*$""")
+
 
 def try_parse_number(v):
     """
@@ -141,11 +154,11 @@ def try_parse_number(v):
 
     m = _TUPLE_ONE_RE.match(s)
     if m:
-        s = m.group('inner').strip()
+        s = m.group("inner").strip()
 
     m = _DECIMAL_RE.match(s)
     if m:
-        s = m.group('num').strip()
+        s = m.group("num").strip()
 
     # limpeza básica
     s = s.replace("%", "").replace(" ", "")
@@ -157,6 +170,7 @@ def try_parse_number(v):
         return float(s)
     except Exception:
         return None
+
 
 def to_nice_number_str(x):
     """Converte float em string 'bonita': 119.0 -> '119', 119.50 -> '119.5'."""
@@ -170,6 +184,7 @@ def to_nice_number_str(x):
         return s
     except Exception:
         return str(x)
+
 
 def clean_value_for_top(v):
     """
@@ -187,40 +202,42 @@ def clean_value_for_top(v):
     s = str(v).strip()
     m = _TUPLE_ONE_RE.match(s)
     if m:
-        s = m.group('inner').strip()
+        s = m.group("inner").strip()
     m = _DECIMAL_RE.match(s)
     if m:
-        s = m.group('num').strip()
+        s = m.group("num").strip()
     # normaliza casos numéricos em string
     xf = try_parse_number(s)
     if xf is not None:
         return to_nice_number_str(xf)
     return s
 
+
 # ---------------- conexões ----------------
 def detect_engine(db_path: Path):
     sfx = db_path.suffix.lower()
-    if sfx == '.duckdb' and duckdb is not None:
-        return 'duckdb'
-    if sfx in ('.sqlite', '.sqlite3') or (sfx == '.db' and duckdb is None):
-        return 'sqlite'
-    if sfx in ('.mdb', '.accdb'):
-        return 'access'
-    return 'sqlite'
+    if sfx == ".duckdb" and duckdb is not None:
+        return "duckdb"
+    if sfx in (".sqlite", ".sqlite3") or (sfx == ".db" and duckdb is None):
+        return "sqlite"
+    if sfx in (".mdb", ".accdb"):
+        return "access"
+    return "sqlite"
+
 
 def open_conn(db_path: Path, engine: str):
-    if engine == 'duckdb':
+    if engine == "duckdb":
         if duckdb is None:
             raise RuntimeError("duckdb não está instalado")
         return duckdb.connect(str(db_path))
-    if engine == 'sqlite':
+    if engine == "sqlite":
         return sqlite3.connect(str(db_path))
-    if engine == 'access':
+    if engine == "access":
         if pyodbc is None:
             raise RuntimeError("pyodbc necessário para Access (.mdb/.accdb).")
         conn_strs = [
-            fr"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={str(db_path)};",
-            fr"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={str(db_path)};"
+            rf"Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={str(db_path)};",
+            rf"Driver={{Microsoft Access Driver (*.mdb)}};DBQ={str(db_path)};",
         ]
         last = None
         for cs in conn_strs:
@@ -228,16 +245,19 @@ def open_conn(db_path: Path, engine: str):
                 return pyodbc.connect(cs, autocommit=True, timeout=30)
             except Exception as e:
                 last = e
-        raise last
+        if last is not None:
+            raise last
+        raise RuntimeError("Falha ao conectar via ODBC")
     raise RuntimeError("engine desconhecida: " + str(engine))
+
 
 def list_columns(db_path: Path, table: str, engine: str):
     conn = open_conn(db_path, engine)
     try:
-        if engine == 'duckdb':
+        if engine == "duckdb":
             cur = conn.execute(f'SELECT * FROM "{table}" LIMIT 0')
             return [c[0] for c in cur.description]
-        if engine == 'sqlite':
+        if engine == "sqlite":
             cur = conn.cursor()
             cur.execute(f'PRAGMA table_info("{table}")')
             return [r[1] for r in cur.fetchall()]
@@ -250,56 +270,66 @@ def list_columns(db_path: Path, table: str, engine: str):
         except Exception:
             pass
 
+
 # ---------------- helpers SQL (fallbacks e contagens) ----------------
 def sql_count_total(db_path: Path, table: str, engine: str):
-    q = f'SELECT COUNT(*) FROM "{table}"' if engine != 'access' else f"SELECT COUNT(*) FROM [{table}]"
+    q = (
+        f'SELECT COUNT(*) FROM "{table}"'
+        if engine != "access"
+        else f"SELECT COUNT(*) FROM [{table}]"
+    )
     conn = open_conn(db_path, engine)
     try:
-        if engine == 'duckdb':
-            r = conn.execute(q).fetchone()[0]
-            return int(r)
+        if engine == "duckdb":
+            row = conn.execute(q).fetchone()
+            return int(row[0]) if row else 0
         cur = conn.cursor()
         cur.execute(q)
-        r = cur.fetchone()[0]
-        return int(r)
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
     finally:
         try:
             conn.close()
         except Exception:
             pass
+
 
 def sql_count_nulls(db_path: Path, table: str, col: str, engine: str):
-    q = (f'SELECT COUNT(*) FROM "{table}" WHERE "{col}" IS NULL'
-         if engine != 'access' else f"SELECT COUNT(*) FROM [{table}] WHERE [{col}] IS NULL")
+    q = (
+        f'SELECT COUNT(*) FROM "{table}" WHERE "{col}" IS NULL'
+        if engine != "access"
+        else f"SELECT COUNT(*) FROM [{table}] WHERE [{col}] IS NULL"
+    )
     conn = open_conn(db_path, engine)
     try:
-        if engine == 'duckdb':
-            r = conn.execute(q).fetchone()[0]
-            return int(r)
+        if engine == "duckdb":
+            row = conn.execute(q).fetchone()
+            return int(row[0]) if row else 0
         cur = conn.cursor()
         cur.execute(q)
-        r = cur.fetchone()[0]
-        return int(r)
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
     finally:
         try:
             conn.close()
         except Exception:
             pass
 
+
 def sql_count_distinct(db_path: Path, table: str, col: str, engine: str):
-    if engine in ('duckdb', 'sqlite'):
+    if engine in ("duckdb", "sqlite"):
         q = f'SELECT COUNT(DISTINCT "{col}") FROM "{table}"'
     else:
         q = f"SELECT COUNT(*) FROM (SELECT DISTINCT [{col}] FROM [{table}])"
     conn = open_conn(db_path, engine)
     try:
-        if engine == 'duckdb':
-            r = conn.execute(q).fetchone()[0]
-            return int(r)
+        if engine == "duckdb":
+            row = conn.execute(q).fetchone()
+            return int(row[0]) if row else 0
         cur = conn.cursor()
         cur.execute(q)
-        r = cur.fetchone()[0]
-        return int(r)
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
     except Exception:
         return None
     finally:
@@ -308,9 +338,12 @@ def sql_count_distinct(db_path: Path, table: str, col: str, engine: str):
         except Exception:
             pass
 
-def sql_top_values_fallback(db_path: Path, table: str, col: str, engine: str, limit: int = 50):
+
+def sql_top_values_fallback(
+    db_path: Path, table: str, col: str, engine: str, limit: int = 50
+):
     try:
-        if engine in ('duckdb', 'sqlite'):
+        if engine in ("duckdb", "sqlite"):
             q = f'SELECT "{col}" as value, COUNT(*) as cnt FROM "{table}" GROUP BY "{col}" ORDER BY cnt DESC LIMIT {limit}'
             conn = open_conn(db_path, engine)
             rows = conn.execute(q).fetchall()
@@ -329,6 +362,7 @@ def sql_top_values_fallback(db_path: Path, table: str, col: str, engine: str, li
         except Exception:
             pass
 
+
 def infer_tipo_aparente_fallback(db_path: Path, table: str, col: str, engine: str):
     vals = sql_top_values_fallback(db_path, table, col, engine, limit=1)
     if not vals:
@@ -336,11 +370,14 @@ def infer_tipo_aparente_fallback(db_path: Path, table: str, col: str, engine: st
     v = vals[0][0]
     if v is None:
         return "desconhecido"
-    return 'numérico' if try_parse_number(v) is not None else 'texto'
+    return "numérico" if try_parse_number(v) is not None else "texto"
+
 
 # ---------------- streaming values ----------------
-def stream_column_values(db_path: Path, table: str, col: str, engine: str, batch_size: int = 2000):
-    if engine == 'duckdb':
+def stream_column_values(
+    db_path: Path, table: str, col: str, engine: str, batch_size: int = 2000
+):
+    if engine == "duckdb":
         conn = open_conn(db_path, engine)
         try:
             cur = conn.execute(f'SELECT "{col}" FROM "{table}"')
@@ -364,7 +401,11 @@ def stream_column_values(db_path: Path, table: str, col: str, engine: str, batch
     conn = open_conn(db_path, engine)
     try:
         cur = conn.cursor()
-        q = f"SELECT [{col}] FROM [{table}]" if engine == 'access' else f'SELECT "{col}" FROM "{table}"'
+        q = (
+            f"SELECT [{col}] FROM [{table}]"
+            if engine == "access"
+            else f'SELECT "{col}" FROM "{table}"'
+        )
         cur.execute(q)
         while True:
             batch = cur.fetchmany(batch_size)
@@ -378,9 +419,18 @@ def stream_column_values(db_path: Path, table: str, col: str, engine: str, batch
         except Exception:
             pass
 
+
 # ---------------- principal ----------------
-def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, top: int = 20,
-                  sample_size: int = 5000, distinct_cap: int = 200000, verbose: bool = False):
+def analyze_table(
+    db_path: Path,
+    table: str,
+    outdir: Path,
+    engine: str | None = None,
+    top: int = 20,
+    sample_size: int = 5000,
+    distinct_cap: int = 200000,
+    verbose: bool = False,
+):
     db_path = Path(db_path)
     engine = engine or detect_engine(db_path)
     if verbose:
@@ -459,9 +509,9 @@ def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, t
         # decidir tipo por maioria dos não-nulos
         non_null_seen = numeric_hits + text_hits
         if non_null_seen > 0 and numeric_hits >= 0.6 * non_null_seen:
-            type_apparent = 'numérico'
+            type_apparent = "numérico"
         elif non_null_seen > 0:
-            type_apparent = 'texto'
+            type_apparent = "texto"
 
         # fallbacks se streaming falhar
         if not streaming_ok:
@@ -480,7 +530,9 @@ def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, t
                 type_apparent = type_apparent or "desconhecido"
             # obter top por GROUP BY (pelo menos para o relatório)
             try:
-                for vv, cc in sql_top_values_fallback(db_path, table, col, engine, limit=top):
+                for vv, cc in sql_top_values_fallback(
+                    db_path, table, col, engine, limit=top
+                ):
                     counter[clean_value_for_top(vv)] += int(cc)
             except Exception:
                 pass
@@ -502,7 +554,7 @@ def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, t
 
         # salvar CSV top
         top_csv_path = cols_dir / f"{col}__top_{top}.csv"
-        with open(top_csv_path, "w", newline='', encoding='utf-8') as fh:
+        with open(top_csv_path, "w", newline="", encoding="utf-8") as fh:
             wcsv = csv.writer(fh)
             wcsv.writerow(["valor", "contagem"])
             for val, cnt in top_vals:
@@ -510,9 +562,11 @@ def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, t
 
         # quantis aproximados (somente se numérico)
         q25 = q50 = q75 = ""
-        if type_apparent == 'numérico' and sampler.sample:
+        if type_apparent == "numérico" and sampler.sample:
             try:
-                arr = np.array([float(x) for x in sampler.sample if x is not None], dtype=float)
+                arr = np.array(
+                    [float(x) for x in sampler.sample if x is not None], dtype=float
+                )
                 if arr.size > 0:
                     q25 = float(np.percentile(arr, 25))
                     q50 = float(np.percentile(arr, 50))
@@ -526,7 +580,11 @@ def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, t
 
         # % sobre NÃO NULOS
         non_null = max(0, total - nulls)
-        top1_pct = round(100.0 * top1_count / non_null, 3) if (non_null and top1_count) else None
+        top1_pct = (
+            round(100.0 * top1_count / non_null, 3)
+            if (non_null and top1_count)
+            else None
+        )
 
         # distinct
         distinct_est = -1 if distinct_set is None else len(distinct_set)
@@ -537,41 +595,48 @@ def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, t
         variancia_sample = w.var_sample() if w.n > 1 else 0.0
         desvio_sample = w.std_sample() if w.n > 1 else 0.0
         coef_variacao = (desvio_pop / w.mean) if (w.n > 0 and w.mean != 0) else 0.0
-        top1_domina = (top1_pct is not None and top1_pct >= 50.0)
+        top1_domina = top1_pct is not None and top1_pct >= 50.0
 
-        summary_rows.append({
-            'coluna': col,
-            'tipo_aparente': type_apparent or "",
-            'linhas_lidas': total,
-            'nulos': nulls,
-            'linhas_nao_nulas': non_null,
-            'distinct_est': distinct_est,
-            'distinct_cap_excedido': bool(distinct_overflow),
-            'value_count': w.n,
-            'mean': w.mean if w.n > 0 else 0.0,
-            'M2': w.M2 if w.n > 0 else 0.0,
-            'variancia': variancia_pop,
-            'desvio_padrao_pop': desvio_pop,
-            'variancia_amostral': variancia_sample,
-            'desvio_padrao_amostral': desvio_sample,
-            'coef_variacao': coef_variacao,
-            'min': w.min if w.min is not None else "",
-            'q25_approx': q25,
-            'median_approx': q50,
-            'q75_approx': q75,
-            'max': w.max if w.max is not None else "",
-            'top1_val': "" if top1_val is None else top1_val,
-            'top1_count': top1_count,
-            'top1_pct_of_column': top1_pct,   # % sobre NÃO NULOS
-            'top1_domina': top1_domina,
-            'top_values_csv': str(top_csv_path),
-            'chart_png': ""
-        })
+        summary_rows.append(
+            {
+                "coluna": col,
+                "tipo_aparente": type_apparent or "",
+                "linhas_lidas": total,
+                "nulos": nulls,
+                "linhas_nao_nulas": non_null,
+                "distinct_est": distinct_est,
+                "distinct_cap_excedido": bool(distinct_overflow),
+                "value_count": w.n,
+                "mean": w.mean if w.n > 0 else 0.0,
+                "M2": w.M2 if w.n > 0 else 0.0,
+                "variancia": variancia_pop,
+                "desvio_padrao_pop": desvio_pop,
+                "variancia_amostral": variancia_sample,
+                "desvio_padrao_amostral": desvio_sample,
+                "coef_variacao": coef_variacao,
+                "min": w.min if w.min is not None else "",
+                "q25_approx": q25,
+                "median_approx": q50,
+                "q75_approx": q75,
+                "max": w.max if w.max is not None else "",
+                "top1_val": "" if top1_val is None else top1_val,
+                "top1_count": top1_count,
+                "top1_pct_of_column": top1_pct,  # % sobre NÃO NULOS
+                "top1_domina": top1_domina,
+                "top_values_csv": str(top_csv_path),
+                "chart_png": "",
+            }
+        )
 
         # gráfico top
         labels = [("" if v is None else str(v)) for v, cnt in top_vals]
         counts = [int(cnt) for v, cnt in top_vals]
-        if distinct_est and isinstance(distinct_est, int) and distinct_est > len(top_vals) and non_null:
+        if (
+            distinct_est
+            and isinstance(distinct_est, int)
+            and distinct_est > len(top_vals)
+            and non_null
+        ):
             others = max(0, non_null - sum(counts))
             if others > 0:
                 labels.append("OUTROS")
@@ -579,7 +644,7 @@ def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, t
         if counts:
             fig, ax = plt.subplots(figsize=(8, max(2, 0.4 * len(labels))))
             y = list(range(len(labels)))
-            ax.barh(y, counts, color='steelblue')
+            ax.barh(y, counts, color="steelblue")
             ax.set_yticks(y)
             ax.set_yticklabels(labels, fontsize=9)
             ax.invert_yaxis()
@@ -589,7 +654,7 @@ def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, t
             chart_path = charts_dir / f"{col}__top_{top}.png"
             try:
                 fig.savefig(str(chart_path), dpi=150)
-                summary_rows[-1]['chart_png'] = str(chart_path)
+                summary_rows[-1]["chart_png"] = str(chart_path)
             except Exception as e:
                 if verbose:
                     print(f"  [aviso] falha ao salvar gráfico {col}: {e}")
@@ -599,32 +664,82 @@ def analyze_table(db_path: Path, table: str, outdir: Path, engine: str = None, t
     summary_path = base_out / "summary_by_column.csv"
     df = pd.DataFrame(summary_rows)
     preferred = [
-        'coluna', 'tipo_aparente', 'linhas_lidas', 'nulos', 'linhas_nao_nulas',
-        'distinct_est', 'distinct_cap_excedido',
-        'value_count', 'mean', 'M2',
-        'variancia', 'desvio_padrao_pop', 'variancia_amostral', 'desvio_padrao_amostral', 'coef_variacao',
-        'min', 'q25_approx', 'median_approx', 'q75_approx', 'max',
-        'top1_val', 'top1_count', 'top1_pct_of_column', 'top1_domina', 'top_values_csv', 'chart_png'
+        "coluna",
+        "tipo_aparente",
+        "linhas_lidas",
+        "nulos",
+        "linhas_nao_nulas",
+        "distinct_est",
+        "distinct_cap_excedido",
+        "value_count",
+        "mean",
+        "M2",
+        "variancia",
+        "desvio_padrao_pop",
+        "variancia_amostral",
+        "desvio_padrao_amostral",
+        "coef_variacao",
+        "min",
+        "q25_approx",
+        "median_approx",
+        "q75_approx",
+        "max",
+        "top1_val",
+        "top1_count",
+        "top1_pct_of_column",
+        "top1_domina",
+        "top_values_csv",
+        "chart_png",
     ]
-    cols = [c for c in preferred if c in df.columns] + [c for c in df.columns if c not in preferred]
-    df[cols].to_csv(summary_path, index=False, encoding='utf-8')
+    cols = [c for c in preferred if c in df.columns] + [
+        c for c in df.columns if c not in preferred
+    ]
+    df[cols].to_csv(summary_path, index=False, encoding="utf-8")
 
     print("\nConcluído. Saída em:", base_out)
     print("Resumo:", summary_path)
     return base_out
 
+
 # ---------------- CLI ----------------
 def parse_args():
-    p = argparse.ArgumentParser(description="Analisar uma tabela por coluna e gerar contagens, gráficos e estatísticas valor-level.")
-    p.add_argument("--db", required=True, help="Caminho para o arquivo de banco (SQLite / DuckDB / Access).")
+    p = argparse.ArgumentParser(
+        description="Analisar uma tabela por coluna e gerar contagens, gráficos e estatísticas valor-level."
+    )
+    p.add_argument(
+        "--db",
+        required=True,
+        help="Caminho para o arquivo de banco (SQLite / DuckDB / Access).",
+    )
     p.add_argument("--table", required=True, help="Nome da tabela a analisar.")
-    p.add_argument("--engine", choices=['sqlite', 'duckdb', 'access'], help="Forçar engine (opcional).")
-    p.add_argument("--outdir", default=".", help="Diretório base de saída (será criada subpasta com timestamp).")
-    p.add_argument("--top", type=int, default=20, help="Top N valores por coluna a listar/plotar.")
-    p.add_argument("--sample-size", type=int, default=5000, help="Tamanho da amostra por coluna para quantis aproximados.")
-    p.add_argument("--distinct-cap", type=int, default=200000, help="Cap para distinct (se exceder, não manter set completo).")
+    p.add_argument(
+        "--engine",
+        choices=["sqlite", "duckdb", "access"],
+        help="Forçar engine (opcional).",
+    )
+    p.add_argument(
+        "--outdir",
+        default=".",
+        help="Diretório base de saída (será criada subpasta com timestamp).",
+    )
+    p.add_argument(
+        "--top", type=int, default=20, help="Top N valores por coluna a listar/plotar."
+    )
+    p.add_argument(
+        "--sample-size",
+        type=int,
+        default=5000,
+        help="Tamanho da amostra por coluna para quantis aproximados.",
+    )
+    p.add_argument(
+        "--distinct-cap",
+        type=int,
+        default=200000,
+        help="Cap para distinct (se exceder, não manter set completo).",
+    )
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose")
     return p.parse_args()
+
 
 def main():
     args = parse_args()
@@ -634,9 +749,18 @@ def main():
         sys.exit(1)
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    analyze_table(db_path, args.table, outdir, engine=args.engine, top=args.top,
-                  sample_size=args.sample_size, distinct_cap=args.distinct_cap, verbose=args.verbose)
+    analyze_table(
+        db_path,
+        args.table,
+        outdir,
+        engine=args.engine,
+        top=args.top,
+        sample_size=args.sample_size,
+        distinct_cap=args.distinct_cap,
+        verbose=args.verbose,
+    )
     return 0
+
 
 if __name__ == "__main__":
     main()

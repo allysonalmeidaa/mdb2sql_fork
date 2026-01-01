@@ -8,6 +8,7 @@ import requests
 import time
 import sys
 from pathlib import Path
+import pytest
 
 BASE_URL = "http://127.0.0.1:5001"
 TEST_FILES_DIR = Path("tests/test_files")
@@ -42,7 +43,7 @@ def test_upload_duckdb():
     arquivo_teste = setup_test_files()
     if not arquivo_teste.exists():
         print("ERRO: Arquivo de teste nao encontrado")
-        return False
+        pytest.fail("Arquivo de teste nao encontrado")
 
     try:
         with open(arquivo_teste, "rb") as f:
@@ -54,16 +55,16 @@ def test_upload_duckdb():
             if data.get("ok"):
                 print(f"Upload OK: {data.get('filename')}")
                 print(f"Tamanho: {data.get('size')} bytes")
-                return True
+                return
             else:
                 print(f"ERRO: {data.get('error', 'Upload falhou')}")
-                return False
+                pytest.fail("Upload falhou")
         else:
             print(f"ERRO HTTP: {response.status_code}")
-            return False
+            pytest.fail(f"Upload HTTP {response.status_code}")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Upload error: {e}")
 
 
 def test_selecao_arquivo():
@@ -75,14 +76,14 @@ def test_selecao_arquivo():
         response = requests.get(f"{BASE_URL}/api/list_uploads", timeout=5)
         if response.status_code != 200:
             print("ERRO: Nao conseguiu listar uploads")
-            return False
+            pytest.fail("Nao conseguiu listar uploads")
 
         data = response.json()
         arquivos = data.get("files", [])
 
         if not arquivos:
             print("ERRO: Nenhum arquivo disponivel")
-            return False
+            pytest.fail("Nenhum arquivo disponivel")
 
         # Selecionar primeiro arquivo DuckDB
         arquivo_duckdb = None
@@ -93,7 +94,7 @@ def test_selecao_arquivo():
 
         if not arquivo_duckdb:
             print("ERRO: Nenhum arquivo DuckDB encontrado")
-            return False
+            pytest.fail("Nenhum arquivo DuckDB encontrado")
 
         # Selecionar arquivo
         payload = {"filename": arquivo_duckdb}
@@ -103,16 +104,16 @@ def test_selecao_arquivo():
             data = response.json()
             if data.get("ok"):
                 print(f"Selecao OK: {data.get('db')}")
-                return True
+                return
             else:
                 print(f"ERRO: {data.get('error', 'Selecao falhou')}")
-                return False
+                pytest.fail("Selecao falhou")
         else:
             print(f"ERRO HTTP: {response.status_code}")
-            return False
+            pytest.fail(f"Selecao HTTP {response.status_code}")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Selecao error: {e}")
 
 
 def test_interface_pos_upload():
@@ -140,22 +141,22 @@ def test_interface_pos_upload():
                         print("OK: Arquivo DuckDB - sem area de conversao")
                         # Verificar se nao ha indicadores de conversao ativa
                         # (isso seria verificado via JavaScript na interface real)
-                        return True
+                        return
                     else:
                         print(f"Tipo de arquivo: {Path(db_atual).suffix}")
-                        return True
+                        return
                 else:
                     print("ERRO: Nao conseguiu listar tabelas")
-                    return False
+                    pytest.fail("Nao conseguiu listar tabelas")
             else:
                 print("ERRO: Nenhum banco conectado")
-                return False
+                pytest.fail("Nenhum banco conectado")
         else:
             print("ERRO: Health check falhou")
-            return False
+            pytest.fail("Health check falhou")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Interface pos upload error: {e}")
 
 
 def test_fulltext_indexacao():
@@ -176,23 +177,23 @@ def test_fulltext_indexacao():
                 # Verificar se nao ha indexacao automatica desnecessaria
                 # Na pratica, isso dependeria da configuracao
                 print("Verificacao: Fulltext deve ser opcional para performance")
-                return True
+                return
             elif db_atual and (
                 db_atual.endswith(".mdb") or db_atual.endswith(".accdb")
             ):
                 print("OK: Fulltext pode ser usado para Access apos conversao")
-                return True
+                return
             else:
                 print(
                     f"Tipo de arquivo: {Path(db_atual).suffix if db_atual else 'none'}"
                 )
-                return True
+                return
         else:
             print("ERRO: Health check falhou")
-            return False
+            pytest.fail("Health check falhou")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Fulltext error: {e}")
 
 
 def test_interface_visual():
@@ -215,16 +216,16 @@ def test_interface_visual():
                 print("Verificacao: Botoes de selecao devem existir")
                 print("Verificacao: Caixa de selecao deve ter indicador visual")
 
-                return True
+                return
             else:
                 print("ERRO: Interface admin nao acessivel")
-                return False
+                pytest.fail("Interface admin nao acessivel")
         else:
             print("ERRO: Interface principal nao carregou")
-            return False
+            pytest.fail("Interface principal nao carregou")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Interface visual error: {e}")
 
 
 def test_comparativo_performance():
@@ -244,7 +245,7 @@ def test_comparativo_performance():
                 print(f"Execucao {i + 1}: {end - start:.3f}s")
             else:
                 print(f"ERRO na execucao {i + 1}")
-                return False
+                pytest.fail("Erro na execucao de performance")
 
         if tempos:
             media = sum(tempos) / len(tempos)
@@ -259,16 +260,16 @@ def test_comparativo_performance():
             # Verificar se e aceitavel (menos que 1 segundo)
             if media < 1.0:
                 print("OK: Performance aceitavel (< 1s)")
-                return True
+                return
             else:
                 print("ERRO: Performance lenta (> 1s)")
-                return False
+                pytest.fail("Performance lenta")
         else:
             print("ERRO: Nenhuma execucao bem sucedida")
-            return False
+            pytest.fail("Nenhuma execucao bem sucedida")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Performance error: {e}")
 
 
 def main():

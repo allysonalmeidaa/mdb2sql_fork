@@ -12,10 +12,10 @@ from typing import Optional, List
 
 def extract_date_from_filename(filename: str) -> Optional[str]:
     patterns = [
-        r'(\d{2})[_-](\d{2})[_-](\d{4})',
-        r'(\d{4})[_-](\d{2})[_-](\d{2})',
-        r'(\d{2})(\d{2})(\d{4})',
-        r'(\d{4})(\d{2})(\d{2})',
+        r"(\d{2})[_-](\d{2})[_-](\d{4})",
+        r"(\d{4})[_-](\d{2})[_-](\d{2})",
+        r"(\d{2})(\d{2})(\d{4})",
+        r"(\d{4})(\d{2})(\d{2})",
     ]
 
     for pattern in patterns:
@@ -31,13 +31,13 @@ def extract_date_from_filename(filename: str) -> Optional[str]:
 
 
 def get_jackcess_classpath():
-    base_dir = Path(__file__).parent / 'temp'
+    base_dir = Path(__file__).parent / "temp"
     jars = [
-        base_dir / 'jackcess-4.0.5.jar',
-        base_dir / 'commons-lang3-3.14.0.jar',
-        base_dir / 'commons-logging-1.3.0.jar'
+        base_dir / "jackcess-4.0.5.jar",
+        base_dir / "commons-lang3-3.14.0.jar",
+        base_dir / "commons-logging-1.3.0.jar",
     ]
-    return ':'.join(str(j) for j in jars)
+    return ":".join(str(j) for j in jars)
 
 
 def get_mdb_tables_jackcess(mdb_file: Path) -> List[str]:
@@ -56,26 +56,24 @@ public class ListTables {{
     }}
 }}
 '''
-        temp_dir = Path('/tmp/mdb2sql_jackcess')
+        temp_dir = Path("/tmp/mdb2sql_jackcess")
         temp_dir.mkdir(exist_ok=True)
-        
-        java_file = temp_dir / 'ListTables.java'
+
+        java_file = temp_dir / "ListTables.java"
         java_file.write_text(java_code)
-        
+
         subprocess.run(
-            ['javac', '-cp', classpath, str(java_file)],
-            check=True,
-            capture_output=True
+            ["javac", "-cp", classpath, str(java_file)], check=True, capture_output=True
         )
-        
+
         result = subprocess.run(
-            ['java', '-cp', f'{classpath}:{temp_dir}', 'ListTables'],
+            ["java", "-cp", f"{classpath}:{temp_dir}", "ListTables"],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
-        
-        tables = [t.strip() for t in result.stdout.split('\n') if t.strip()]
+
+        tables = [t.strip() for t in result.stdout.split("\n") if t.strip()]
         return tables
     except subprocess.CalledProcessError as e:
         print(f"Error listing tables: {e}")
@@ -126,24 +124,22 @@ public class ExportTable {{
     }}
 }}
 '''
-        temp_dir = Path('/tmp/mdb2sql_jackcess')
+        temp_dir = Path("/tmp/mdb2sql_jackcess")
         temp_dir.mkdir(exist_ok=True)
-        
-        java_file = temp_dir / 'ExportTable.java'
+
+        java_file = temp_dir / "ExportTable.java"
         java_file.write_text(java_code)
-        
+
         subprocess.run(
-            ['javac', '-cp', classpath, str(java_file)],
-            check=True,
-            capture_output=True
+            ["javac", "-cp", classpath, str(java_file)], check=True, capture_output=True
         )
-        
+
         subprocess.run(
-            ['java', '-cp', f'{classpath}:{temp_dir}', 'ExportTable'],
+            ["java", "-cp", f"{classpath}:{temp_dir}", "ExportTable"],
             check=True,
-            capture_output=True
+            capture_output=True,
         )
-        
+
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error exporting table {table_name}: {e}")
@@ -151,9 +147,7 @@ public class ExportTable {{
 
 
 def import_to_duckdb(
-    mdb_file: Path,
-    duckdb_file: Path,
-    file_date: Optional[str] = None
+    mdb_file: Path, duckdb_file: Path, file_date: Optional[str] = None
 ):
     print(f"\nProcessing: {mdb_file.name}")
 
@@ -162,7 +156,7 @@ def import_to_duckdb(
 
     if not file_date:
         print(f"WARNING: Could not extract date from {mdb_file.name}")
-        file_date = datetime.now().strftime('%Y-%m-%d')
+        file_date = datetime.now().strftime("%Y-%m-%d")
 
     print(f"Date extracted: {file_date}")
 
@@ -189,11 +183,11 @@ def import_to_duckdb(
     conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_import_id START 1")
 
     import_timestamp = datetime.now()
-    temp_dir = Path('/tmp/mdb2sql')
+    temp_dir = Path("/tmp/mdb2sql")
     temp_dir.mkdir(exist_ok=True)
 
     for table in tables:
-        print(f"  Importing: {table}...", end=' ', flush=True)
+        print(f"  Importing: {table}...", end=" ", flush=True)
 
         csv_file = temp_dir / f"{table}.csv"
 
@@ -218,14 +212,25 @@ def import_to_duckdb(
                 )
             """)
 
-            result = conn.execute(f'SELECT COUNT(*) FROM "{table_with_date}"').fetchone()
+            result = conn.execute(
+                f'SELECT COUNT(*) FROM "{table_with_date}"'
+            ).fetchone()
             row_count = result[0] if result else 0
 
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO _metadata
                 (import_id, source_file, file_date, import_timestamp, table_name, row_count)
                 VALUES (nextval('seq_import_id'), ?, ?, ?, ?, ?)
-            """, [mdb_file.name, file_date, import_timestamp, table_with_date, row_count])
+            """,
+                [
+                    mdb_file.name,
+                    file_date,
+                    import_timestamp,
+                    table_with_date,
+                    row_count,
+                ],
+            )
 
             print(f"OK ({row_count} rows)")
 
@@ -239,40 +244,38 @@ def import_to_duckdb(
 
 
 def batch_import(input_dir: Path, duckdb_file: Path):
-    mdb_files = sorted(list(input_dir.glob('*.mdb')) + list(input_dir.glob('*.accdb')))
+    mdb_files = sorted(list(input_dir.glob("*.mdb")) + list(input_dir.glob("*.accdb")))
 
     if not mdb_files:
         print(f"No MDB/ACCDB files found in {input_dir}")
         return
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Found {len(mdb_files)} files to process")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     for i, mdb_file in enumerate(mdb_files, 1):
-        print(f"\n[{i}/{len(mdb_files)}]", end=' ')
+        print(f"\n[{i}/{len(mdb_files)}]", end=" ")
         import_to_duckdb(mdb_file, duckdb_file)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert MDB/ACCDB to DuckDB using Jackcess'
+        description="Convert MDB/ACCDB to DuckDB using Jackcess"
     )
     parser.add_argument(
-        '--input',
+        "--input", type=Path, help="Input MDB/ACCDB file or directory for batch"
+    )
+    parser.add_argument(
+        "--output",
         type=Path,
-        help='Input MDB/ACCDB file or directory for batch'
+        default=Path("database.duckdb"),
+        help="Output DuckDB file (default: database.duckdb)",
     )
     parser.add_argument(
-        '--output',
-        type=Path,
-        default=Path('database.duckdb'),
-        help='Output DuckDB file (default: database.duckdb)'
-    )
-    parser.add_argument(
-        '--batch',
-        action='store_true',
-        help='Process all MDB/ACCDB files in --input directory'
+        "--batch",
+        action="store_true",
+        help="Process all MDB/ACCDB files in --input directory",
     )
 
     args = parser.parse_args()
@@ -297,5 +300,5 @@ def main():
         import_to_duckdb(args.input, args.output)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

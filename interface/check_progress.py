@@ -8,12 +8,14 @@ from interface.utils import resolve_db_path
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 
+
 def quote_ident(name):
     if not isinstance(name, str) or not name:
         raise ValueError("Invalid identifier")
     if "\x00" in name:
         raise ValueError("Invalid identifier")
     return '"' + name.replace('"', '""') + '"'
+
 
 def main():
     parser = argparse.ArgumentParser(description="Check _fulltext indexing progress")
@@ -31,7 +33,16 @@ def main():
     try:
         tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
         # ignore internal/system tables and _fulltext itself
-        tables = [t for t in tables if not (t.lower().startswith('msys') or t.lower().startswith('sqlite_') or t.lower().startswith('duckdb_') or t.lower() == '_fulltext')]
+        tables = [
+            t
+            for t in tables
+            if not (
+                t.lower().startswith("msys")
+                or t.lower().startswith("sqlite_")
+                or t.lower().startswith("duckdb_")
+                or t.lower() == "_fulltext"
+            )
+        ]
         print(f"Found {len(tables)} user tables to check.")
         missing = []
         table_counts = {}
@@ -49,7 +60,9 @@ def main():
             except Exception as e:
                 print(f"  Could not read table counts in batch: {e}")
         try:
-            rows = conn.execute("SELECT table_name, COUNT(*) FROM _fulltext GROUP BY table_name").fetchall()
+            rows = conn.execute(
+                "SELECT table_name, COUNT(*) FROM _fulltext GROUP BY table_name"
+            ).fetchall()
             fulltext_counts = {name: cnt for name, cnt in rows}
         except Exception:
             fulltext_counts = {}
@@ -71,10 +84,11 @@ def main():
         else:
             print("Tables not yet fully indexed (table, table_rows, indexed_rows):")
             for t, total, idx in missing:
-                print(f"  {t}: {idx} / {total} indexed (missing {total-idx})")
+                print(f"  {t}: {idx} / {total} indexed (missing {total - idx})")
             print(f"\nTotal tables with missing rows: {len(missing)}")
     finally:
         conn.close()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

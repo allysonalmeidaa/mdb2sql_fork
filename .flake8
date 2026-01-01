@@ -1,0 +1,19 @@
+[flake8]
+extend-ignore =
+    E302,
+    E303,
+    E501
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    .mypy_cache,
+    .ruff_cache,
+    .pytest_cache,
+    .idea,
+    .vscode,
+    .claude,
+    build,
+    dist,
+    node_modules,
+    test-results

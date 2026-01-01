@@ -40,6 +40,7 @@ PROJECT_ROOT = BASE_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+
 # Logging setup: reduce request noise and log key events only
 def _setup_event_logger():
     logger = logging.getLogger("mdb2sql")
@@ -68,6 +69,7 @@ def log_event(message):
         _EVENT_LOG.info(_safe_ascii(message))
     except Exception:
         pass
+
 
 # Optional modules
 try:
@@ -226,6 +228,7 @@ def index():
     resp.headers["Cache-Control"] = "no-store, max-age=0"
     return resp
 
+
 @app.route("/admin")
 def admin_page():
     resp = app.send_static_file("admin.html")
@@ -267,17 +270,27 @@ def safe_int(value, default):
 # Cache simples mas efetivo para tabelas
 _tables_cache = {}
 _cache_timestamp = {}
+_cache_mtime = {}
 _cache_ttl = 60  # 60 segundos de cache
 
 
 def list_tables_duckdb(path):
     """Lista tabelas de um arquivo DuckDB/SQLite com cache otimizado."""
     try:
+        cache_key = str(path)
         # Verificar cache
         current_time = time.time()
-        if path in _tables_cache and path in _cache_timestamp:
-            if current_time - _cache_timestamp[path] < _cache_ttl:
-                return _tables_cache[path]
+        current_mtime = None
+        try:
+            current_mtime = Path(path).stat().st_mtime
+        except Exception:
+            current_mtime = None
+        if cache_key in _tables_cache and cache_key in _cache_timestamp:
+            cached_mtime = _cache_mtime.get(cache_key)
+            if current_time - _cache_timestamp[cache_key] < _cache_ttl and (
+                current_mtime is None or cached_mtime == current_mtime
+            ):
+                return _tables_cache[cache_key]
 
         # Buscar do banco
         conn = duckdb_connect(path)
@@ -287,10 +300,21 @@ def list_tables_duckdb(path):
                 "SELECT table_name FROM information_schema.tables WHERE table_schema='main' AND table_name NOT LIKE '_%'"
             ).fetchall()
             tables = [r[0] for r in rows]
+            if not tables:
+                rows = conn.execute("SHOW TABLES").fetchall()
+                tables = [
+                    r[0]
+                    for r in rows
+                    if r[0]
+                    and not str(r[0]).lower().startswith("_")
+                    and not str(r[0]).lower().startswith("sqlite_")
+                    and not str(r[0]).lower().startswith("duckdb_")
+                ]
 
             # Atualizar cache
-            _tables_cache[path] = tables
-            _cache_timestamp[path] = current_time
+            _tables_cache[cache_key] = tables
+            _cache_timestamp[cache_key] = current_time
+            _cache_mtime[cache_key] = current_mtime
 
             return tables
         finally:
@@ -347,14 +371,16 @@ def list_tables_access(path):
         try:
             conn.close()
         except Exception as close_exc:
-            close_trace = "".join(
-                traceback.format_exception(
-                    type(close_exc), close_exc, close_exc.__traceback__
+            close_trace = (
+                "".join(
+                    traceback.format_exception(
+                        type(close_exc), close_exc, close_exc.__traceback__
+                    )
                 )
-            ).replace("\n", " ").replace("\r", " ")
-            log_event(
-                f"event=access_close_error err={close_exc} trace={close_trace}"
+                .replace("\n", " ")
+                .replace("\r", " ")
             )
+            log_event(f"event=access_close_error err={close_exc} trace={close_trace}")
 
 
 # ---------------- Admin endpoints ----------------
@@ -409,7 +435,9 @@ def admin_status():
                 rows = conn.execute(
                     "SELECT table_name, COUNT(*) as c FROM _fulltext GROUP BY table_name ORDER BY c DESC LIMIT 50"
                 ).fetchall()
-                status["top_tables"] = [{"table": r[0], "count": int(r[1])} for r in rows]
+                status["top_tables"] = [
+                    {"table": r[0], "count": int(r[1])} for r in rows
+                ]
             except Exception:
                 status["fulltext_count"] = 0
                 status["top_tables"] = []
@@ -461,9 +489,11 @@ def health_check():
         }
     )
 
+
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     return admin_upload()
+
 
 @app.route("/api/list_uploads", methods=["GET"])
 def api_list_uploads():
@@ -479,6 +509,7 @@ def api_list_uploads():
                 }
             )
     return jsonify({"files": files})
+
 
 @app.route("/api/select_db", methods=["POST"])
 def api_select_db():
@@ -510,9 +541,7 @@ def admin_upload():
     dest = UPLOAD_DIR / filename
     f.save(dest)
     try:
-        log_event(
-            f"event=upload name={filename} ext={ext} size={dest.stat().st_size}"
-        )
+        log_event(f"event=upload name={filename} ext={ext} size={dest.stat().st_size}")
     except Exception:
         pass
     # duckdb -> select immediately
@@ -565,7 +594,6 @@ def admin_upload():
                     )
 
             def run_convert():
-                global convert_status
                 try:
                     ok, msg = convert_access_to_duckdb(
                         str(dest),
@@ -621,7 +649,9 @@ def admin_upload():
                                                 chunk=2000,
                                                 batch_insert=1000,
                                             )
-                                            log_event(f"event=index_done db={out_duckdb}")
+                                            log_event(
+                                                f"event=index_done db={out_duckdb}"
+                                            )
                                         except Exception as e:
                                             log_event(
                                                 f"event=index_error db={out_duckdb} err={e}"
@@ -686,6 +716,9 @@ def admin_delete():
             clear_db_path()
         target.unlink()
         log_event(f"event=db_delete name={target.name}")
+        _tables_cache.pop(str(target), None)
+        _cache_timestamp.pop(str(target), None)
+        _cache_mtime.pop(str(target), None)
         # remove converted duckdb with same stem
         duck_out = UPLOAD_DIR / f"{target.stem}.duckdb"
         if duck_out.exists():
@@ -693,6 +726,9 @@ def admin_delete():
                 duck_out.unlink()
             except Exception:
                 pass
+            _tables_cache.pop(str(duck_out), None)
+            _cache_timestamp.pop(str(duck_out), None)
+            _cache_mtime.pop(str(duck_out), None)
         return jsonify({"ok": True, "deleted": str(target.name)})
     except Exception as e:
         return jsonify({"error": f"falha ao apagar: {e}"}), 500
@@ -827,7 +863,9 @@ def after_request(response):
 def api_tables():
     dbpath = get_db_path()
     if not dbpath:
-        return jsonify({"tables": [], "count": 0, "error": "Nenhum DB selecionado"}), 200
+        return jsonify(
+            {"tables": [], "count": 0, "error": "Nenhum DB selecionado"}
+        ), 200
 
     # Verificar se o arquivo existe
     if not Path(dbpath).exists():
@@ -968,14 +1006,16 @@ def api_table():
         try:
             conn.close()
         except Exception as close_exc:
-            close_trace = "".join(
-                traceback.format_exception(
-                    type(close_exc), close_exc, close_exc.__traceback__
+            close_trace = (
+                "".join(
+                    traceback.format_exception(
+                        type(close_exc), close_exc, close_exc.__traceback__
+                    )
                 )
-            ).replace("\n", " ").replace("\r", " ")
-            log_event(
-                f"event=access_close_error err={close_exc} trace={close_trace}"
+                .replace("\n", " ")
+                .replace("\r", " ")
             )
+            log_event(f"event=access_close_error err={close_exc} trace={close_trace}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1022,17 +1062,21 @@ def api_search_duckdb(
         try:
             conn.close()
         except Exception as close_exc:
-            close_trace = "".join(
-                traceback.format_exception(
-                    type(close_exc), close_exc, close_exc.__traceback__
+            close_trace = (
+                "".join(
+                    traceback.format_exception(
+                        type(close_exc), close_exc, close_exc.__traceback__
+                    )
                 )
-            ).replace("\n", " ").replace("\r", " ")
-            log_event(
-                f"event=duckdb_close_error err={close_exc} trace={close_trace}"
+                .replace("\n", " ")
+                .replace("\r", " ")
             )
-        trace = "".join(
-            traceback.format_exception(type(exc), exc, exc.__traceback__)
-        ).replace("\n", " ").replace("\r", " ")
+            log_event(f"event=duckdb_close_error err={close_exc} trace={close_trace}")
+        trace = (
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            .replace("\n", " ")
+            .replace("\r", " ")
+        )
         log_event(f"event=duckdb_search_error err={exc} trace={trace}")
         return {"error": f"search failed: {exc}"}
 

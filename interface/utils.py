@@ -8,6 +8,7 @@ import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
+
 def normalize_text(s: str) -> str:
     """
     Normaliza texto:
@@ -37,6 +38,7 @@ def normalize_text(s: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
+
 def serialize_value(v):
     """Converte tipos retornados pelo DuckDB em valores JSON-compatíveis (pronto para json.dumps)."""
     if v is None:
@@ -46,14 +48,16 @@ def serialize_value(v):
     if isinstance(v, decimal.Decimal):
         # representamos decimal como float (pode ajustar para str se preferir precisão)
         return float(v)
-    if isinstance(v, (bytes, bytearray, memoryview)):
+    if isinstance(v, memoryview):
+        try:
+            return v.tobytes().decode("utf-8", errors="replace")
+        except Exception:
+            return repr(v)
+    if isinstance(v, (bytes, bytearray)):
         try:
             return bytes(v).decode("utf-8", errors="replace")
         except Exception:
-            try:
-                return v.tobytes().decode("utf-8", errors="replace")
-            except Exception:
-                return repr(v)
+            return repr(v)
     if isinstance(v, (int, float, str, bool)):
         return v
     # fallback
@@ -61,6 +65,7 @@ def serialize_value(v):
         return str(v)
     except Exception:
         return None
+
 
 def resolve_db_path(explicit_path=None, uploads_dir=None):
     if explicit_path:
@@ -80,6 +85,7 @@ def resolve_db_path(explicit_path=None, uploads_dir=None):
             f"Multiple .duckdb files found in {uploads_dir}. Set DB_PATH or use --db to select."
         )
     return candidates[0]
+
 
 def clamp_int(value, default, min_value=0, max_value=None):
     try:

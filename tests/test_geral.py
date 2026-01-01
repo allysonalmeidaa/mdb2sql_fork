@@ -7,6 +7,7 @@ Valida performance, cache, seguranca e funcionalidades principais.
 import requests
 import time
 import sys
+import pytest
 
 BASE_URL = "http://127.0.0.1:5001"
 
@@ -21,13 +22,13 @@ def test_health_check():
             print(f"Cache size: {data.get('cache_size')}")
             print(f"Current DB: {data.get('current_db')}")
             print("OK Health check funcionando")
-            return True
+            return
         else:
             print(f"ERRO HTTP {response.status_code}")
-            return False
+            pytest.fail(f"Health check HTTP {response.status_code}")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Health check error: {e}")
 
 
 def test_list_tables_performance():
@@ -44,7 +45,7 @@ def test_list_tables_performance():
                 print(f"Execucao {i + 1}: {end - start:.3f}s")
             else:
                 print(f"ERRO na execucao {i + 1}")
-                return False
+                pytest.fail("Erro na execucao de listagem de tabelas")
 
         if tempos:
             media = sum(tempos) / len(tempos)
@@ -54,16 +55,16 @@ def test_list_tables_performance():
 
             if media < 1.0:
                 print("OK Performance aceitavel")
-                return True
+                return
             else:
                 print("ERRO Performance lenta")
-                return False
+                pytest.fail("Performance lenta")
         else:
             print("ERRO Nenhuma execucao bem sucedida")
-            return False
+            pytest.fail("Nenhuma execucao bem sucedida")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Performance error: {e}")
 
 
 def test_cache_eficacia():
@@ -87,13 +88,13 @@ def test_cache_eficacia():
         # Verificar consistencia
         if response1.json() == response2.json():
             print("OK Cache funcionando")
-            return True
+            return
         else:
             print("ERRO Resultados inconsistentes")
-            return False
+            pytest.fail("Resultados inconsistentes")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Cache error: {e}")
 
 
 def test_seguranca_validacao():
@@ -105,7 +106,7 @@ def test_seguranca_validacao():
             print("Nome valido: OK")
         else:
             print("Nome valido: ERRO")
-            return False
+            pytest.fail("Nome valido rejeitado")
 
         # Testar nome invalido
         nome_invalido = "RANGER; DROP TABLE--"
@@ -113,13 +114,13 @@ def test_seguranca_validacao():
             print("Nome invalido: OK Rejeitado")
         else:
             print("Nome invalido: ERRO Aceito")
-            return False
+            pytest.fail("Nome invalido aceito")
 
         print("OK Validacao de seguranca")
-        return True
+        return
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Seguranca error: {e}")
 
 
 def test_list_uploads():
@@ -135,13 +136,13 @@ def test_list_uploads():
                 print(f"  - {f['name']} ({f['size']} bytes)")
 
             print("OK Listagem uploads")
-            return True
+            return
         else:
             print(f"ERRO HTTP {response.status_code}")
-            return False
+            pytest.fail(f"List uploads HTTP {response.status_code}")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"List uploads error: {e}")
 
 
 def test_estatisticas_opcionais():
@@ -159,13 +160,13 @@ def test_estatisticas_opcionais():
             tem_stats = "stats" in response.json()
             print(f"Com stats=true: {'Sim' if tem_stats else 'Nao'}")
             print("OK Estatisticas opcionais")
-            return True
+            return
         else:
             print(f"ERRO HTTP {response.status_code}")
-            return False
+            pytest.fail(f"Stats HTTP {response.status_code}")
     except Exception as e:
         print(f"ERRO: {e}")
-        return False
+        pytest.fail(f"Stats error: {e}")
 
 
 def main():
