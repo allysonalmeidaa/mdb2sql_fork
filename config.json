@@ -1,4 +1,6 @@
 {
   "db_path": "",
-  "priority_tables": []
+  "priority_tables": [],
+  "conversion_mode": "odbc_preferred",
+  "odbc_enabled": true
 }

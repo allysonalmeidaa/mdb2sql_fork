@@ -1,8 +1,12 @@
 {
   "db_path": "",
   "priority_tables": [
-    "RANGER_SOSTAT"
+    "RANGER_SOSTAT",
+    "items"
   ],
-  "auto_index_after_convert": true,
-  "remember_last_db": false
+  "auto_index_after_convert": false,
+  "remember_last_db": false,
+  "priority_tables_by_db": {},
+  "conversion_mode": "odbc_preferred",
+  "odbc_enabled": true
 }

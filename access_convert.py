@@ -29,7 +29,8 @@ def convert_access_to_duckdb(
     access_path: str,
     duckdb_path: str,
     chunk_size: int = 50000,
-    prefer_odbc: bool = True,
+    conversion_mode: str = "odbc_preferred",
+    odbc_enabled: bool = True,
     progress_callback=None,
 ):
     """
@@ -48,6 +49,16 @@ def convert_access_to_duckdb(
                 progress_callback(kw)
         except Exception:
             pass
+
+    def _normalize_mode(value):
+        if value is None:
+            return "odbc_preferred"
+        mode = str(value).strip().lower()
+        if mode in ("pure_only", "pure", "no_odbc"):
+            return "pure_only"
+        if mode in ("odbc_preferred", "odbc", "auto"):
+            return "odbc_preferred"
+        return "odbc_preferred"
 
     def try_pyodbc():
         try:
@@ -364,32 +375,56 @@ def convert_access_to_duckdb(
             except Exception:
                 pass
 
-    # Try methods by preference
-    if prefer_odbc:
-        ok, msg = try_pyodbc()
+    def try_pyaccess_parser():
+        try:
+            from convert_pyaccess_parser import convert_mdb_to_duckdb
+        except Exception as e:
+            return False, f"pyaccess_parser not available: {e}"
+        _report(
+            total_tables=0,
+            processed_tables=0,
+            current_table="",
+            percent=0,
+            msg="starting_pyaccess_parser",
+        )
+        _ensure_clean_duckdb(duckdb_path)
+        ok = bool(
+            convert_mdb_to_duckdb(access_path, duckdb_path, batch_mode=True)
+        )
+        if ok:
+            _report(
+                total_tables=0,
+                processed_tables=0,
+                current_table="",
+                percent=100,
+                msg="converted",
+            )
+            return True, "converted via pyaccess_parser"
+        return False, "pyaccess_parser failed"
+
+    conversion_mode = _normalize_mode(conversion_mode)
+    use_odbc = bool(odbc_enabled) and conversion_mode != "pure_only"
+
+    if not use_odbc:
+        ok, msg = try_pyaccess_parser()
         if ok:
             return True, msg
-        ok2, msg2 = try_pypyodbc()
-        if ok2:
-            return True, msg2
-        ok3, msg3 = try_mdbtools()
-        if ok3:
-            return True, msg3
-        return (
-            False,
-            f"All methods failed: pyodbc: {msg}; pypyodbc: {msg2}; mdbtools: {msg3}",
-        )
-    else:
-        ok, msg = try_mdbtools()
-        if ok:
-            return True, msg
-        ok2, msg2 = try_pyodbc()
-        if ok2:
-            return True, msg2
-        ok3, msg3 = try_pypyodbc()
-        if ok3:
-            return True, msg3
-        return (
-            False,
-            f"No method succeeded: mdbtools: {msg}; pyodbc: {msg2}; pypyodbc: {msg3}",
-        )
+        return False, f"pyaccess_parser failed: {msg}"
+
+    ok, msg = try_pyodbc()
+    if ok:
+        return True, msg
+    ok2, msg2 = try_pypyodbc()
+    if ok2:
+        return True, msg2
+    ok3, msg3 = try_pyaccess_parser()
+    if ok3:
+        return True, msg3
+    ok4, msg4 = try_mdbtools()
+    if ok4:
+        return True, msg4
+    return (
+        False,
+        "All methods failed: "
+        f"pyodbc: {msg}; pypyodbc: {msg2}; pyaccess_parser: {msg3}; mdbtools: {msg4}",
+    )
