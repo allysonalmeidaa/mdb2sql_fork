@@ -128,6 +128,39 @@ function createDuckdbWithFulltext(filePath) {
   return false;
 }
 
+async function stubStatusRoutes(page, status, logs) {
+  const db = status && status.db ? status.db : "";
+  const uploads = db ? [{ name: db }] : [];
+  await page.route("**/admin/list_uploads", route => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        current_db: db || null,
+        uploads,
+        priority_tables: [],
+        auto_index_after_convert: status && status.auto_index_after_convert
+          ? status.auto_index_after_convert
+          : false
+      })
+    });
+  });
+  await page.route("**/admin/status", route => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(status || {})
+    });
+  });
+  await page.route("**/admin/logs", route => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, logs: logs || [] })
+    });
+  });
+}
+
 async function uploadFile(request, name, filePath) {
   const buffer = fs.readFileSync(filePath);
   const res = await request.post("/admin/upload", {
@@ -956,4 +989,292 @@ test("admin page access upload", async ({ page }, testInfo) => {
   await page.locator("#uploadBtn").click();
   await expect(page.locator("#uploadMsg")).toContainText(/ok|error|Convers/i);
   await expect(page.locator("#uploadsList .upload-row", { hasText: name })).toBeVisible();
+});
+
+const presenceChecks = [
+  { name: "header brand dot", selector: "header .brand-dot" },
+  { name: "header title", selector: "header h1" },
+  { name: "header subtitle", selector: "header .subtitle" },
+  { name: "open config button", selector: "#openConfig" },
+  { name: "open status button", selector: "#openStatus" },
+  { name: "status alerts badge", selector: "#statusAlerts" },
+  { name: "open files button", selector: "#openFilesBtn" },
+  { name: "refresh button", selector: "#refreshBtn" },
+  { name: "flow banner", selector: "#flowBanner" },
+  { name: "flow hint", selector: "#flowHint" },
+  { name: "current db", selector: "#currentDb" },
+  { name: "mode badge", selector: "#modeBadge" },
+  { name: "index status", selector: "#indexStatus" },
+  { name: "flow steps", selector: ".flow-steps" },
+  { name: "step select", selector: "#stepSelect" },
+  { name: "step convert", selector: "#stepConvert" },
+  { name: "step index", selector: "#stepIndex" },
+  { name: "step search", selector: "#stepSearch" },
+  { name: "files panel", selector: "#filesPanel" },
+  { name: "files list", selector: "#filesList" },
+  { name: "files sort", selector: "#filesSort" },
+  { name: "files help text", selector: "#filesHelpText" },
+  { name: "db tabs", selector: "#dbTabs" },
+  { name: "db tab help", selector: "#dbTabHelp" },
+  { name: "table list", selector: "#tableList" },
+  { name: "results area", selector: "#resultsArea" },
+  { name: "overlay", selector: "#overlay" },
+  { name: "config modal", selector: "#configModal" },
+  { name: "status modal", selector: "#statusModal" },
+  { name: "priority modal", selector: "#priorityModal" },
+  { name: "index modal", selector: "#indexModal" },
+  { name: "search modal", selector: "#searchModal" }
+];
+
+presenceChecks.forEach(({ name, selector }) => {
+  test(`ui structure: ${name}`, async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(selector)).toHaveCount(1);
+  });
+});
+
+const stepTextChecks = [
+  { name: "step select text", selector: "#stepSelect", text: "Selecionar" },
+  { name: "step convert text", selector: "#stepConvert", text: "Converter" },
+  { name: "step index text", selector: "#stepIndex", text: "Indexar" },
+  { name: "step search text", selector: "#stepSearch", text: "Buscar" },
+  { name: "status deck title", selector: ".steps-title", text: "Fluxo" },
+  { name: "files panel title", selector: "#filesPanel strong", text: "Gestao de arquivos" }
+];
+
+stepTextChecks.forEach(({ name, selector, text }) => {
+  test(`ui copy: ${name}`, async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(selector)).toContainText(text);
+  });
+});
+
+const closeButtonChecks = [
+  { name: "close config exists", selector: "#closeConfig" },
+  { name: "close status exists", selector: "#closeStatus" },
+  { name: "close priority exists", selector: "#closePriority" },
+  { name: "close index exists", selector: "#closeIndex" },
+  { name: "close search exists", selector: "#closeSearch" }
+];
+
+closeButtonChecks.forEach(({ name, selector }) => {
+  test(`ui controls: ${name}`, async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(selector)).toHaveCount(1);
+  });
+});
+
+const noDbSearchDisabledChecks = [
+  { name: "search input disabled without db", selector: "#q" },
+  { name: "search button disabled without db", selector: "#searchBtn" },
+  { name: "export all disabled without db", selector: "#exportAllBtn" }
+];
+
+noDbSearchDisabledChecks.forEach(({ name, selector }) => {
+  test(`ui disabled: ${name}`, async ({ page }) => {
+    await page.goto("/");
+    await page.locator("#openSearchInline").click();
+    await expect(page.locator("#searchModal")).toBeVisible();
+    await expect(page.locator(selector)).toBeDisabled();
+  });
+});
+
+const noDbIndexDisabledChecks = [
+  { name: "index start disabled", selector: "#startIndex" },
+  { name: "index drop disabled", selector: "#dropCheckbox" },
+  { name: "index chunk disabled", selector: "#chunk" },
+  { name: "index batch disabled", selector: "#batch" },
+  { name: "index reset disabled", selector: "#resetIndexDefaults" }
+];
+
+noDbIndexDisabledChecks.forEach(({ name, selector }) => {
+  test(`ui disabled: ${name}`, async ({ page }) => {
+    await page.goto("/");
+    await page.locator("#openIndex").click();
+    await expect(page.locator("#indexModal")).toBeVisible();
+    await expect(page.locator(selector)).toBeDisabled();
+  });
+});
+
+const flowHintCases = [
+  {
+    name: "flow hint with no db",
+    status: { db: "", fulltext_count: 0, conversion: { running: false, ok: true } },
+    expected: "Selecione um DB"
+  },
+  {
+    name: "flow hint for conversion running",
+    status: { db: "sample.accdb", fulltext_count: 0, conversion: { running: true, ok: true } },
+    expected: "Conversao em andamento"
+  },
+  {
+    name: "flow hint for access selected",
+    status: { db: "sample.accdb", fulltext_count: 0, conversion: { running: false, ok: true } },
+    expected: "Access selecionado"
+  },
+  {
+    name: "flow hint for duckdb without fulltext",
+    status: { db: "sample.duckdb", fulltext_count: 0, conversion: { running: false, ok: true } },
+    expected: "DuckDB selecionado"
+  },
+  {
+    name: "flow hint for duckdb ready",
+    status: { db: "sample.duckdb", fulltext_count: 5, conversion: { running: false, ok: true } },
+    expected: "Pronto para buscar"
+  },
+  {
+    name: "flow hint for access conversion failed",
+    status: { db: "sample.accdb", fulltext_count: 0, conversion: { running: false, ok: false, msg: "falhou" } },
+    expected: "Access selecionado"
+  }
+];
+
+flowHintCases.forEach(({ name, status, expected }) => {
+  test(`ui hint: ${name}`, async ({ page }) => {
+    await stubStatusRoutes(page, status, []);
+    await page.goto("/");
+    await expect(page.locator("#flowHint")).toContainText(expected);
+  });
+});
+
+const filesHelpCases = [
+  {
+    name: "files help with no db",
+    status: { db: "", fulltext_count: 0, conversion: { running: false, ok: true } },
+    expected: "Gerencie uploads aqui"
+  },
+  {
+    name: "files help with access db",
+    status: { db: "sample.accdb", fulltext_count: 0, conversion: { running: false, ok: true } },
+    expected: "Access: uploads"
+  },
+  {
+    name: "files help with duckdb db",
+    status: { db: "sample.duckdb", fulltext_count: 3, conversion: { running: false, ok: true } },
+    expected: "DuckDB: esta lista"
+  },
+  {
+    name: "files help with duckdb empty",
+    status: { db: "sample.duckdb", fulltext_count: 0, conversion: { running: false, ok: true } },
+    expected: "DuckDB: esta lista"
+  }
+];
+
+filesHelpCases.forEach(({ name, status, expected }) => {
+  test(`ui files help: ${name}`, async ({ page }) => {
+    await stubStatusRoutes(page, status, []);
+    await page.goto("/");
+    await expect(page.locator("#filesHelpText")).toContainText(expected);
+  });
+});
+
+const statusAlertCases = [
+  {
+    name: "status alerts for conversion error",
+    status: { db: "sample.accdb", fulltext_count: 0, conversion: { running: false, ok: false, msg: "falhou" } },
+    logs: [],
+    expected: /Conversao/i
+  },
+  {
+    name: "status alerts for missing indexer",
+    status: { db: "sample.duckdb", fulltext_count: 0, conversion: { running: false, ok: true }, indexer_available: false, indexer_error: "indisponivel" },
+    logs: [],
+    expected: /Indexador/i
+  },
+  {
+    name: "status alerts for access selected",
+    status: { db: "sample.accdb", fulltext_count: 0, conversion: { running: false, ok: true } },
+    logs: [],
+    expected: /Access selecionado/i
+  },
+  {
+    name: "status alerts for missing fulltext",
+    status: { db: "sample.duckdb", fulltext_count: 0, conversion: { running: false, ok: true } },
+    logs: [],
+    expected: /Indice _fulltext/i
+  },
+  {
+    name: "status alerts for conversion running info",
+    status: { db: "sample.accdb", fulltext_count: 0, conversion: { running: true, ok: true } },
+    logs: [],
+    expected: /Alertas: info/i
+  },
+  {
+    name: "status alerts from server logs",
+    status: { db: "sample.duckdb", fulltext_count: 3, conversion: { running: false, ok: true } },
+    logs: [{ ts: "09:00:00", level: "error", message: "backend failed" }],
+    expected: /backend failed/i
+  }
+];
+
+statusAlertCases.forEach(({ name, status, logs, expected }) => {
+  test(`ui alerts: ${name}`, async ({ page }) => {
+    await stubStatusRoutes(page, status, logs);
+    await page.goto("/");
+    await page.locator("#openStatus").click();
+    await expect(page.locator("#statusModal")).toBeVisible();
+    await expect(page.locator("#statusAlerts")).toContainText(expected);
+  });
+});
+
+const conversionProgressCases = [
+  {
+    name: "conversion running shows progress",
+    status: {
+      db: "sample.accdb",
+      fulltext_count: 0,
+      conversion: {
+        running: true,
+        ok: true,
+        percent: 87,
+        current_table: "RANGER",
+        processed_tables: 252,
+        total_tables: 287
+      },
+      auto_index_after_convert: true
+    },
+    percentText: "87%",
+    statusText: "Convertendo: RANGER"
+  },
+  {
+    name: "conversion ok and fulltext ready",
+    status: {
+      db: "sample.duckdb",
+      fulltext_count: 10,
+      conversion: { running: false, ok: true, msg: "converted via pyodbc" }
+    },
+    percentText: "100%",
+    statusText: "indexacao concluida"
+  },
+  {
+    name: "conversion ok without fulltext",
+    status: {
+      db: "sample.duckdb",
+      fulltext_count: 0,
+      conversion: { running: false, ok: true, msg: "converted via pyaccess" }
+    },
+    percentText: "100%",
+    statusText: "aguarda indexacao"
+  },
+  {
+    name: "conversion failed shows message",
+    status: {
+      db: "sample.accdb",
+      fulltext_count: 0,
+      conversion: { running: false, ok: false, msg: "All methods failed" }
+    },
+    percentText: "0%",
+    statusText: "All methods failed"
+  }
+];
+
+conversionProgressCases.forEach(({ name, status, percentText, statusText }) => {
+  test(`ui conversion: ${name}`, async ({ page }) => {
+    await stubStatusRoutes(page, status, []);
+    await page.goto("/");
+    await page.locator("#openStatus").click();
+    await expect(page.locator("#statusModal")).toBeVisible();
+    await expect(page.locator("#convPercentText")).toContainText(percentText);
+    await expect(page.locator("#convStatusText")).toContainText(statusText);
+  });
 });
