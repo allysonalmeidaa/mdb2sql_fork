@@ -190,6 +190,15 @@ async function openConfig(page) {
   await expect(page.locator("#configModal")).toBeVisible();
 }
 
+async function openFilesPanel(page) {
+  await ensureOverlayClosed(page);
+  const panel = page.locator("#filesPanel");
+  if (!(await panel.isVisible())) {
+    await page.locator("#openFilesBtn").click();
+    await expect(panel).toBeVisible();
+  }
+}
+
 async function closeConfig(page) {
   await page.locator("#closeConfig").click();
   await expect(page.locator("#configModal")).toBeHidden();
@@ -208,12 +217,23 @@ async function closeIndex(page) {
   await ensureOverlayClosed(page);
 }
 
+async function closeStatus(page) {
+  await page.locator("#closeStatus").click();
+  await expect(page.locator("#statusModal")).toBeHidden();
+  await ensureOverlayClosed(page);
+}
+
 async function selectDbFromConfig(page, fileName) {
   await openConfig(page);
   const row = page.locator("#uploadsList .upload-row", { hasText: fileName });
   await expect(row).toBeVisible();
-  await row.locator("button.select-btn").click();
-  await expect(page.locator("#configModal")).toBeHidden();
+  const selectBtn = row.locator("button.select-btn");
+  if (!(await selectBtn.isDisabled())) {
+    await selectBtn.click();
+    await expect(page.locator("#configModal")).toBeHidden();
+  } else {
+    await closeConfig(page);
+  }
   await expect(page.locator("#currentDb")).toContainText(fileName);
 }
 
@@ -249,6 +269,16 @@ test("config modal and flow tabs", async ({ page }) => {
   await closeConfig(page);
 });
 
+test("status modal opens", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#openStatus").click();
+  await expect(page.locator("#statusModal")).toBeVisible();
+  await expect(page.locator("#statusCriticalList")).toBeVisible();
+  await expect(page.locator("#statusWarnList")).toBeVisible();
+  await expect(page.locator("#statusInfoList")).toBeVisible();
+  await closeStatus(page);
+});
+
 test("flow guard blocks wrong file extensions", async ({ page }, testInfo) => {
   const badAccdb = `${TEST_PREFIX}bad_access.accdb`;
   const badDuckdb = `${TEST_PREFIX}bad_duckdb.duckdb`;
@@ -259,6 +289,7 @@ test("flow guard blocks wrong file extensions", async ({ page }, testInfo) => {
 
   await page.goto("/");
   await openConfig(page);
+  await page.locator('#flowTabs .tab-btn[data-flow="duckdb"]').click();
 
   const uploadMsg = page.locator("#uploadMsg");
   const fileInput = page.locator("#fileInput");
@@ -283,10 +314,6 @@ test("upload via api shows metadata in lists", async ({ page, request }, testInf
   await uploadFile(request, name, filePath);
 
   await page.goto("/");
-  const mainRow = page.locator("#filesList .file-row", { hasText: name });
-  await expect(mainRow).toBeVisible();
-  await expect(mainRow.locator(".file-meta")).toContainText("tamanho");
-
   await openConfig(page);
   const uploadRow = page.locator("#uploadsList .upload-row", { hasText: name });
   await expect(uploadRow).toBeVisible();
@@ -294,6 +321,10 @@ test("upload via api shows metadata in lists", async ({ page, request }, testInf
   await expect(uploadRow.locator(".file-status")).toContainText("ok");
 
   await closeConfig(page);
+  await openFilesPanel(page);
+  const mainRow = page.locator("#filesList .file-row", { hasText: name });
+  await expect(mainRow).toBeVisible();
+  await expect(mainRow.locator(".file-meta")).toContainText("tamanho");
 });
 
 test("select db from list", async ({ page, request }, testInfo) => {
@@ -318,6 +349,36 @@ test("select db from list", async ({ page, request }, testInfo) => {
   await closeConfig(page);
 });
 
+test("status deck and steps reflect duckdb readiness", async ({ page, request }, testInfo) => {
+  const fileName = `${TEST_PREFIX}ready.duckdb`;
+  const filePath = testInfo.outputPath(fileName);
+  createDuckdbWithFulltext(filePath);
+
+  await uploadFile(request, fileName, filePath);
+  await page.goto("/");
+  await selectDbFromConfig(page, fileName);
+
+  await expect(page.locator("#statusDbValue")).toContainText("ready.duckdb");
+  await expect(page.locator("#statusIndexValue")).toContainText("Pronto");
+  await expect(page.locator("#statusSearchValue")).toContainText("Disponivel");
+  await expect(page.locator("#stepSearch")).toHaveClass(/done/);
+});
+
+test("access selection shows conversion banner", async ({ page, request }, testInfo) => {
+  const fileName = `${TEST_PREFIX}access_banner.accdb`;
+  const filePath = testInfo.outputPath(fileName);
+  writeDummyFile(filePath);
+
+  await uploadFile(request, fileName, filePath);
+  await page.goto("/");
+  await selectDbFromConfig(page, fileName);
+
+  const banner = page.locator("#flowBanner");
+  await expect(banner).toBeVisible();
+  const text = (await banner.innerText()).toLowerCase();
+  expect(text).toMatch(/access|conversao/);
+});
+
 test("files list sort toggles order", async ({ page, request }, testInfo) => {
   const fileA = `${TEST_PREFIX}alpha.duckdb`;
   const fileB = `${TEST_PREFIX}zeta.duckdb`;
@@ -330,6 +391,7 @@ test("files list sort toggles order", async ({ page, request }, testInfo) => {
   await uploadFile(request, fileB, tempPathB);
 
   await page.goto("/");
+  await openFilesPanel(page);
   const namesAsc = await getFileNames(page);
   const posA = namesAsc.indexOf(fileA);
   const posB = namesAsc.indexOf(fileB);
@@ -417,12 +479,9 @@ test("index modal disabled with no db", async ({ page }) => {
 
 test("search without db shows alert", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#q").fill("test");
-  page.once("dialog", dialog => {
-    expect(dialog.message()).toContain("Selecione um DB");
-    dialog.accept();
-  });
-  await page.locator("#searchBtn").click();
+  await expect(page.locator("#q")).toBeDisabled();
+  await expect(page.locator("#searchBtn")).toBeDisabled();
+  await expect(page.locator("#flowBanner")).toContainText("Selecione um arquivo");
 });
 
 test("auto index toggle updates message and state", async ({ page, request }) => {
@@ -489,8 +548,14 @@ test("index defaults reset restores values", async ({ page, request }, testInfo)
   await closeIndex(page);
 });
 
-test("advanced reset restores defaults", async ({ page }) => {
+test("advanced reset restores defaults", async ({ page, request }, testInfo) => {
+  const name = `${TEST_PREFIX}advanced_reset.duckdb`;
+  const filePath = testInfo.outputPath(name);
+  createDuckdbWithFulltext(filePath);
+  await uploadFile(request, name, filePath);
+
   await page.goto("/");
+  await selectDbFromConfig(page, name);
   await page.locator("#advancedPanel").click();
 
   await page.locator("#per_table").fill("5");
@@ -527,6 +592,7 @@ test("duckdb ui upload and main buttons", async ({ page, request }, testInfo) =>
   });
   await closeConfig(page);
 
+  await openFilesPanel(page);
   await page.locator("#refreshFilesBtn").click();
   await expect(page.locator("#filesList .file-row", { hasText: name })).toBeVisible();
   await page.locator("#refreshBtn").click();

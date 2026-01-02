@@ -103,6 +103,12 @@ let accessStems = new Set();
 let lastConversionRunning = false;
 let activeModalId = null;
 let statusPollTimer = null;
+let lastTablesByDb = {};
+let filesPanelOpen = false;
+let uiLogItems = [];
+let lastAlerts = { critical: [], warn: [], info: [] };
+let lastServerLogs = [];
+let lastServerAlerts = { critical: [], warn: [], info: [] };
 const STATUS_POLL_ACTIVE_MS = 3000;
 const STATUS_POLL_MODAL_MS = 15000;
   const STATUS_POLL_IDLE_MS = 45000;
@@ -118,7 +124,9 @@ const STATUS_POLL_MODAL_MS = 15000;
     String(now.getSeconds()).padStart(2, '0');
   const line = ts + ' ' + level + ' ' + msg;
   uiLogEntries.push(line);
+  uiLogItems.push({ ts: ts, level: level, msg: msg });
   if(uiLogEntries.length > LOG_LIMIT) uiLogEntries.shift();
+  if(uiLogItems.length > 80) uiLogItems.shift();
   const el = $('uiLog');
   if(el) el.textContent = uiLogEntries.join('\n');
   if(level === 'ERROR') console.error(line);
@@ -187,6 +195,262 @@ window.addEventListener('unhandledrejection', (e)=>{
     if(!el) return;
     if(typeof text === 'string') el.textContent = text;
     el.style.display = show ? 'block' : 'none';
+  }
+
+  function setFlowBanner(text, level){
+    const el = $('flowBanner');
+    if(!el) return;
+    if(!text){
+      el.textContent = '';
+      el.style.display = 'none';
+      el.classList.remove('info','warn','error');
+      return;
+    }
+    el.textContent = text;
+    el.style.display = 'block';
+    el.classList.remove('info','warn','error');
+    if(level) el.classList.add(level);
+  }
+
+  function setSearchControlsEnabled(enabled){
+    const ids = ['q','searchBtn','per_table','candidate_limit','total_limit','token_mode','min_score','tablesFilter','clearTablesFilter'];
+    ids.forEach(id => {
+      const el = $(id);
+      if(el) el.disabled = !enabled;
+    });
+    const advanced = $('advancedPanel');
+    if(advanced){
+      if(enabled) advanced.classList.remove('controls-disabled');
+      else advanced.classList.add('controls-disabled');
+    }
+  }
+
+  function setStatusTile(valueId, metaId, valueText, metaText){
+    const valEl = $(valueId);
+    if(valEl) valEl.textContent = valueText || '-';
+    const metaEl = $(metaId);
+    if(metaEl) metaEl.textContent = metaText || '';
+  }
+
+  function setStepState(stepId, state){
+    const el = $(stepId);
+    if(!el) return;
+    el.classList.remove('done','active','warn');
+    if(state) el.classList.add(state);
+  }
+
+  function updateConversionModeText(status){
+    const el = $('conversionModeText');
+    if(!el) return;
+    if(!status){
+      el.textContent = '';
+      return;
+    }
+    const mode = status.conversion_mode || 'odbc_preferred';
+    const odbcEnabled = status.odbc_enabled !== false;
+    if(!odbcEnabled){
+      el.textContent = 'Modo atual: ODBC desativado (usando pyaccess_parser).';
+      return;
+    }
+    if(mode === 'pure_only'){
+      el.textContent = 'Modo atual: conversao pura (sem ODBC).';
+      return;
+    }
+    el.textContent = 'Modo atual: ODBC preferencial com fallback.';
+  }
+
+  function updatePrimaryHint(status, showHint){
+    const shouldShow = showHint !== false;
+    if(!status){
+      setFlowHint('Selecione um DB para começar.', shouldShow);
+      return;
+    }
+    const db = status.db || '';
+    const dbType = getFlowFromName(db);
+    const converted = dbType === 'duckdb' && isConvertedDuckdb(shortName(db), accessStems);
+    if(!db){
+      setFlowHint('Selecione um DB em Configurar/Upload para liberar busca e indexacao.', shouldShow);
+      return;
+    }
+    if(status.conversion && status.conversion.running){
+      setFlowHint('Conversao em andamento. Aguarde o termino para indexar.', shouldShow);
+      return;
+    }
+    if(dbType === 'access' && !converted){
+      setFlowHint('Access selecionado. Converta para DuckDB antes de buscar.', shouldShow);
+      return;
+    }
+    if(dbType === 'duckdb' && !status.fulltext_count){
+      setFlowHint('DuckDB selecionado. Crie o indice _fulltext para buscar.', shouldShow);
+      return;
+    }
+    setFlowHint('Pronto para buscar. Use filtros, prioridade e selecao de tabelas.', shouldShow);
+  }
+
+  function updateFilesHelpText(status){
+    const el = $('filesHelpText');
+    if(!el) return;
+    if(!status || !status.db){
+      el.textContent = 'Gerencie uploads aqui. A selecao de tabelas fica na barra lateral.';
+      return;
+    }
+    const dbType = getFlowFromName(status.db || '');
+    if(dbType === 'access'){
+      el.textContent = 'Access: uploads (.mdb/.accdb) aparecem aqui. A conversao cria um .duckdb com o mesmo nome.';
+      return;
+    }
+    el.textContent = 'DuckDB: esta lista e apenas para gestao de arquivos (upload/baixar/excluir).';
+  }
+
+  function shortenText(text, maxLen){
+    if(!text) return '';
+    const t = String(text);
+    if(t.length <= maxLen) return t;
+    return t.slice(0, Math.max(0, maxLen - 3)) + '...';
+  }
+
+  function buildStatusAlerts(status){
+    const critical = [];
+    const warn = [];
+    const info = [];
+    if(!status){
+      info.push('Sem status do servidor.');
+      return { critical: critical, warn: warn, info: info };
+    }
+    if(status.indexer_available === false){
+      critical.push('Indexador indisponivel: ' + (status.indexer_error || 'erro'));
+    }
+    if(status.conversion && status.conversion.ok === false){
+      critical.push('Conversao: ' + (status.conversion.msg || 'falhou'));
+    }
+    if(status.conversion && status.conversion.running){
+      info.push('Conversao em andamento.');
+    }
+    const db = status.db || '';
+    const dbType = getFlowFromName(db);
+    const converted = dbType === 'duckdb' && isConvertedDuckdb(shortName(db), accessStems);
+    if(dbType === 'access' && !converted && !(status.conversion && status.conversion.running)){
+      warn.push('Access selecionado: aguarde conversao ou troque para DuckDB.');
+    }
+    if(dbType === 'duckdb' && !status.fulltext_count){
+      warn.push('Indice _fulltext ausente: a busca esta bloqueada.');
+    }
+    return { critical: critical, warn: warn, info: info };
+  }
+
+  function classifyServerLog(entry){
+    const level = String((entry && entry.level) || '').toLowerCase();
+    const msg = String((entry && entry.message) || '');
+    if(level === 'error' || level === 'critical') return 'critical';
+    if(level === 'warn' || level === 'warning') return 'warn';
+    if(/error|exception|traceback|failed/i.test(msg)) return 'critical';
+    if(/warn|missing|timeout/i.test(msg)) return 'warn';
+    return 'info';
+  }
+
+  function buildServerAlertsFromLogs(logs){
+    const critical = [];
+    const warn = [];
+    const info = [];
+    (logs || []).forEach(entry => {
+      const msg = String((entry && entry.message) || '').trim();
+      if(!msg) return;
+      const bucket = classifyServerLog(entry);
+      if(bucket === 'critical') critical.push(msg);
+      else if(bucket === 'warn') warn.push(msg);
+      else info.push(msg);
+    });
+    return { critical: critical, warn: warn, info: info };
+  }
+
+  function mergeAlerts(base, extra){
+    const seen = new Set();
+    const mergeList = (a, b) => {
+      const out = [];
+      (a || []).forEach(item => { const key = String(item); if(!seen.has(key)){ seen.add(key); out.push(item); } });
+      (b || []).forEach(item => { const key = String(item); if(!seen.has(key)){ seen.add(key); out.push(item); } });
+      return out;
+    };
+    return {
+      critical: mergeList(base.critical, extra.critical),
+      warn: mergeList(base.warn, extra.warn),
+      info: mergeList(base.info, extra.info)
+    };
+  }
+
+  async function fetchServerLogs(){
+    try{
+      const data = await apiJSON('/admin/logs');
+      if(data && data.ok && Array.isArray(data.logs)){
+        lastServerLogs = data.logs;
+        lastServerAlerts = buildServerAlertsFromLogs(lastServerLogs);
+        updateStatusAlerts(lastStatus);
+      }
+    }catch(e){
+      logUi('WARN', 'logs falhou');
+    }
+  }
+
+  function updateStatusAlerts(status){
+    lastAlerts = buildStatusAlerts(status);
+    const merged = mergeAlerts(lastAlerts, lastServerAlerts);
+    const badge = $('statusAlerts');
+    if(!badge) return;
+    if(merged.critical.length){
+      if(merged.critical.length === 1){
+        badge.textContent = 'Alertas: ' + shortenText(merged.critical[0], 42);
+      } else {
+        badge.textContent = 'Alertas: ' + merged.critical.length + ' criticos';
+      }
+    } else if(merged.warn.length){
+      if(merged.warn.length === 1){
+        badge.textContent = 'Alertas: ' + shortenText(merged.warn[0], 42);
+      } else {
+        badge.textContent = 'Alertas: ' + merged.warn.length + ' avisos';
+      }
+    } else if(merged.info.length){
+      badge.textContent = 'Alertas: info';
+    } else {
+      badge.textContent = 'Alertas: ok';
+    }
+  }
+
+  function setStatusList(el, items, emptyText){
+    if(!el) return;
+    if(!items || !items.length){
+      el.innerHTML = '<li class="muted">' + (emptyText || 'Nenhum') + '</li>';
+      return;
+    }
+    el.innerHTML = items.map(item => '<li>' + escapeHtml(String(item)) + '</li>').join('');
+  }
+
+  function renderStatusModal(){
+    const merged = mergeAlerts(lastAlerts, lastServerAlerts);
+    setStatusList($('statusCriticalList'), merged.critical, 'Nenhum alerta critico.');
+    setStatusList($('statusWarnList'), merged.warn, 'Nenhum aviso.');
+    setStatusList($('statusInfoList'), merged.info, 'Sem informacoes adicionais.');
+    const logEl = $('statusLogList');
+    if(logEl){
+      const serverLines = (lastServerLogs || []).map(entry => {
+        const ts = entry && entry.ts ? entry.ts : '';
+        const level = entry && entry.level ? String(entry.level).toUpperCase() : 'INFO';
+        const msg = entry && entry.message ? entry.message : '';
+        return `${ts} ${level} ${msg}`.trim();
+      }).filter(Boolean);
+      const clientLines = uiLogEntries.slice();
+      if(serverLines.length || clientLines.length){
+        const parts = [];
+        if(serverLines.length){
+          parts.push('[server]\n' + serverLines.join('\n'));
+        }
+        if(clientLines.length){
+          parts.push('[client]\n' + clientLines.join('\n'));
+        }
+        logEl.textContent = parts.join('\n\n');
+      } else {
+        logEl.textContent = 'Nenhum log recente.';
+      }
+    }
   }
 
   function resetAdvancedDefaults(){
@@ -276,13 +540,16 @@ function forceModalStyles(modal, overlay){
     }
   }
 
+  function closeAllModals(){
+    ['configModal','priorityModal','indexModal','statusModal'].forEach(id => resetModalStyles($(id)));
+    activeModalId = null;
+  }
+
   function openModalById(modalId){
     const modal = $(modalId);
     const overlay = $('overlay');
     if(!modal) return;
-    if(activeModalId && activeModalId !== modalId){
-      closeModal();
-    }
+    closeAllModals();
     activeModalId = modalId;
     document.body.classList.add('modal-open');
     forceModalStyles(modal, overlay);
@@ -335,11 +602,7 @@ function forceModalStyles(modal, overlay){
     const modalId = activeModalId;
     const overlay = $('overlay');
     document.body.classList.remove('modal-open');
-    if(modalId){
-      resetModalStyles($(modalId));
-    } else {
-      ['configModal','priorityModal','indexModal'].forEach(id => resetModalStyles($(id)));
-    }
+    closeAllModals();
     if(overlay){
       overlay.style.display = 'none';
       overlay.style.zIndex = '';
@@ -385,7 +648,9 @@ function setNoDbState(opts){
   if($('modeBadge')) $('modeBadge').textContent = 'Modo: -';
     if($('indexStatus')) $('indexStatus').textContent = 'Status: -';
     if($('adminStatus')) $('adminStatus').innerHTML = 'DB: none';
-    setFlowHint('Selecione um DB em Configurar / Upload.', showHint);
+  updatePrimaryHint(null, showHint);
+  updateFilesHelpText(null);
+  updateStatusAlerts(null);
     const exportBtn = $('exportAllBtn');
     if(exportBtn) exportBtn.disabled = true;
     if($('resultsArea')) $('resultsArea').innerHTML = '';
@@ -394,6 +659,16 @@ function setNoDbState(opts){
   if($('tableList')) $('tableList').innerHTML = '<div class="muted">Nenhum DB selecionado</div>';
   const tablesFilter = $('tablesFilter');
   if(tablesFilter) tablesFilter.innerHTML = '';
+  setFlowBanner('Selecione um arquivo para liberar busca e indexacao.', 'info');
+  setSearchControlsEnabled(false);
+  setStatusTile('statusDbValue','statusDbMeta','nenhum','Selecione um arquivo');
+  setStatusTile('statusConvValue','statusConvMeta','-','Nenhuma conversao');
+  setStatusTile('statusIndexValue','statusIndexMeta','-','Sem DB');
+  setStatusTile('statusSearchValue','statusSearchMeta','-','Sem DB');
+  setStepState('stepSelect','active');
+  setStepState('stepConvert','');
+  setStepState('stepIndex','');
+  setStepState('stepSearch','');
   const convText = $('convStatusText');
   if(convText) convText.textContent = 'Nenhum DB selecionado';
   const convPercent = $('convPercentText');
@@ -421,6 +696,40 @@ async function apiJSON(path, opts){
   }
   if(!r.ok){
     const errMsg = (data && data.error) ? data.error : 'http ' + r.status;
+    logUi('ERROR', path + ' ' + errMsg);
+  }
+  return data;
+}
+
+function setFilesPanelOpen(open){
+  filesPanelOpen = !!open;
+  const panel = $('filesPanel');
+  const btn = $('openFilesBtn');
+  if(panel) panel.hidden = !filesPanelOpen;
+  if(btn){
+    btn.setAttribute('aria-expanded', filesPanelOpen ? 'true' : 'false');
+  }
+}
+
+function apiJSONSync(path){
+  const req = new XMLHttpRequest();
+  try{
+    req.open('GET', path, false);
+    req.send(null);
+  }catch(e){
+    setServerOnline(false, e && e.message ? e.message : 'fetch error');
+    throw e;
+  }
+  if(!serverOnline) setServerOnline(true);
+  let data = null;
+  try{
+    data = JSON.parse(req.responseText || '{}');
+  }catch(e){
+    logUi('ERROR', 'json parse fail ' + path);
+    throw e;
+  }
+  if(req.status < 200 || req.status >= 300){
+    const errMsg = (data && data.error) ? data.error : 'http ' + req.status;
     logUi('ERROR', path + ' ' + errMsg);
   }
   return data;
@@ -499,7 +808,7 @@ function renderFilesMain(){
     const selectedBadge = isSelected ? '<span class="selected-badge">Selecionado</span>' : '';
     return `<div class="file-row${isSelected ? ' selected' : ''}">
       <div>
-        <div class="file-name">${name} ${badge} ${selectedBadge}</div>
+        <div class="file-name"><span class="file-name-text">${name}</span> ${badge} ${selectedBadge}</div>
         <div class="file-meta">${metaText}</div>
         <div class="file-status">${statusText}</div>
       </div>
@@ -565,9 +874,10 @@ function renderSelectedInfo(){
   if(mainEl) mainEl.textContent = text;
 }
 
-async function refreshUiState(){
+async function refreshUiState(opts){
   try{
-    const uploads = await apiJSON('/admin/list_uploads');
+    const useSync = opts && opts.sync === true;
+    const uploads = useSync ? apiJSONSync('/admin/list_uploads') : await apiJSON('/admin/list_uploads');
     currentDb = uploads.current_db || '';
     priorityTables = uploads.priority_tables || [];
     lastUploads = uploads.uploads || [];
@@ -587,6 +897,7 @@ async function refreshUiState(){
       autoIndexToggle.checked = !!uploads.auto_index_after_convert;
     }
     renderFilesMain();
+    renderDbTabs();
   }catch(e){
     const filesList = $('filesList');
     if(filesList) filesList.textContent = 'Erro ao listar arquivos';
@@ -598,7 +909,6 @@ async function refreshUiState(){
   const hasDb = hasDbSelected();
   if(hasDb){
     document.body.classList.remove('needs-selection');
-    setFlowHint('DB selecionado: ' + shortName(currentDb) + '. Pesquise abaixo.', true);
     if($('searchMeta')) $('searchMeta').textContent = 'Digite um termo e clique em Pesquisar.';
     if($('openConfig')) $('openConfig').classList.remove('attention');
     refreshTables();
@@ -606,6 +916,33 @@ async function refreshUiState(){
     if($('openConfig')) $('openConfig').classList.add('attention');
   }
   scheduleStatusPoll();
+}
+
+function renderDbTabs(){
+  const el = $('dbTabs');
+  const help = $('dbTabHelp');
+  if(!el) return;
+  const items = (lastUploads || []).filter(f => f && f.name && isSupportedFileName(f.name));
+  if(!items.length){
+    el.innerHTML = '';
+    if(help) help.textContent = 'Nenhum banco enviado ainda.';
+    return;
+  }
+  const sorted = items.slice().sort((a, b) => {
+    const da = a && a.modified ? new Date(a.modified).getTime() : 0;
+    const db = b && b.modified ? new Date(b.modified).getTime() : 0;
+    return db - da;
+  });
+  const currentName = shortName(currentDb || '').toLowerCase();
+  el.innerHTML = sorted.map(f => {
+    const name = f.name;
+    const isActive = currentName && currentName === String(name).toLowerCase();
+    const cls = isActive ? 'db-tab active' : 'db-tab';
+    return `<button class="${cls}" onclick="selectDbFromTab('${encodeURIComponent(name)}')" title="${name}">${name}</button>`;
+  }).join('');
+  if(help){
+    help.textContent = 'Abas por banco: clique para trocar as tabelas exibidas.';
+  }
 }
 
 async function refreshStatus(){
@@ -617,11 +954,15 @@ async function refreshStatus(){
     const conversionRunning = !!(s.conversion && s.conversion.running);
     const dbType = getFlowFromName(db);
     const converted = dbType === 'duckdb' && isConvertedDuckdb(dbName, accessStems);
+    const indexReady = !!(s.fulltext_count && dbType === 'duckdb');
     const uiFlow = conversionRunning ? 'access' : (converted ? 'access' : (dbType || currentFlow));
     const indexFlow = conversionRunning ? '' : dbType;
     const modalOpen = activeModalId === 'configModal';
     if(!modalOpen && manualFlowOverride){
       manualFlowOverride = '';
+    }
+    if(!db && !conversionRunning && !manualFlowOverride && currentFlow !== 'duckdb'){
+      setFlow('duckdb');
     }
     const manualFlow = (modalOpen && manualFlowOverride) ? manualFlowOverride : '';
     const desiredFlow = manualFlow || uiFlow;
@@ -629,7 +970,6 @@ async function refreshStatus(){
     if(conversionRunning){
       setFlow('access');
       setDbTypeClass('none');
-      setFlowHint('Conversao em andamento. Aguarde o termino.', true);
     } else if(dbType){
       if(currentFlow !== desiredFlow){
         setFlow(desiredFlow);
@@ -659,11 +999,108 @@ async function refreshStatus(){
       }
     }
 
+    updateConversionModeText(s);
+    updatePrimaryHint(s, true);
+    updateFilesHelpText(s);
+    updateStatusAlerts(s);
+
     if(indexFlow === 'duckdb'){
       if(s.indexing) $('indexStatus').textContent = 'Indexando...';
       else $('indexStatus').textContent = s.fulltext_count ? 'Pronto' : 'Necessario';
     } else {
       $('indexStatus').textContent = conversionRunning ? 'Convertendo' : 'N/A';
+    }
+
+    setStatusTile(
+      'statusDbValue',
+      'statusDbMeta',
+      db ? dbName : 'nenhum',
+      db ? (dbType === 'duckdb' ? 'DuckDB' : 'Access') : 'Selecione um arquivo'
+    );
+    if(conversionRunning){
+      const pct = s.conversion && s.conversion.percent ? s.conversion.percent + '%' : '0%';
+      setStatusTile('statusConvValue','statusConvMeta','Convertendo', pct + ' ' + (s.conversion.current_table || ''));
+    } else if(s.conversion && s.conversion.ok){
+      setStatusTile('statusConvValue','statusConvMeta','Concluida', s.conversion.msg || 'Conversao ok');
+    } else if(dbType === 'duckdb' && !converted){
+      setStatusTile('statusConvValue','statusConvMeta','Nao precisa','DuckDB nativo');
+    } else {
+      setStatusTile('statusConvValue','statusConvMeta','Inativa', s.conversion && s.conversion.msg ? s.conversion.msg : 'Nenhuma conversao');
+    }
+    if(indexFlow === 'duckdb'){
+      if(s.indexing){
+        setStatusTile('statusIndexValue','statusIndexMeta','Indexando','Construindo _fulltext');
+      } else if(s.fulltext_count){
+        setStatusTile('statusIndexValue','statusIndexMeta','Pronto', s.fulltext_count + ' linhas');
+      } else {
+        setStatusTile('statusIndexValue','statusIndexMeta','Necessario','Indice ausente');
+      }
+    } else {
+      setStatusTile('statusIndexValue','statusIndexMeta','N/A','Somente DuckDB');
+    }
+    if(indexReady && !conversionRunning && !s.indexing){
+      setStatusTile('statusSearchValue','statusSearchMeta','Disponivel','Pronto para buscar');
+    } else if(conversionRunning){
+      setStatusTile('statusSearchValue','statusSearchMeta','Bloqueada','Aguardando conversao');
+    } else if(s.indexing){
+      setStatusTile('statusSearchValue','statusSearchMeta','Bloqueada','Indexando _fulltext');
+    } else {
+      setStatusTile('statusSearchValue','statusSearchMeta','Bloqueada','Indice necessario');
+    }
+
+    setStepState('stepSelect', (db || conversionRunning) ? 'done' : 'active');
+    if(conversionRunning){
+      setStepState('stepConvert','active');
+    } else if(dbType === 'access'){
+      setStepState('stepConvert','warn');
+    } else {
+      setStepState('stepConvert','done');
+    }
+    if(indexFlow === 'duckdb'){
+      if(s.indexing) setStepState('stepIndex','active');
+      else if(s.fulltext_count) setStepState('stepIndex','done');
+      else setStepState('stepIndex','active');
+    } else {
+      setStepState('stepIndex','warn');
+    }
+    if(indexReady && !conversionRunning && !s.indexing){
+      setStepState('stepSearch','done');
+    } else {
+      setStepState('stepSearch','active');
+    }
+
+    if(conversionRunning){
+      setFlowBanner('Conversao em andamento. Aguarde para indexar e buscar.', 'warn');
+      setSearchControlsEnabled(false);
+    } else if(dbType === 'access' && !converted){
+      setFlowBanner('Banco Access selecionado. Converta para DuckDB para liberar busca completa.', 'warn');
+      setSearchControlsEnabled(false);
+    } else if(dbType === 'access' && converted && s.odbc_enabled === false){
+      setFlowBanner('Conversao pura ativada. ODBC desativado no servidor.', 'info');
+      setSearchControlsEnabled(false);
+    } else if(indexFlow === 'duckdb' && !s.fulltext_count){
+      setFlowBanner('Indice _fulltext necessario antes de buscar.', 'info');
+      setSearchControlsEnabled(false);
+    } else if(s.indexing){
+      setFlowBanner('Indexacao em andamento. Busca liberada ao terminar.', 'info');
+      setSearchControlsEnabled(false);
+    } else {
+      setFlowBanner('', '');
+      setSearchControlsEnabled(true);
+    }
+
+    if($('searchMeta')){
+      if(conversionRunning){
+        $('searchMeta').textContent = 'Busca bloqueada: conversao em andamento.';
+      } else if(dbType === 'access' && !converted){
+        $('searchMeta').textContent = 'Busca bloqueada: converta para DuckDB.';
+      } else if(indexFlow === 'duckdb' && !s.fulltext_count){
+        $('searchMeta').textContent = 'Busca bloqueada: crie o indice _fulltext.';
+      } else if(s.indexing){
+        $('searchMeta').textContent = 'Busca bloqueada: indexacao em andamento.';
+      } else {
+        $('searchMeta').textContent = 'Digite um termo e clique em Pesquisar.';
+      }
     }
 
     const canIndex = indexFlow === 'duckdb' && !s.indexing && indexerAvailable;
@@ -755,10 +1192,20 @@ async function refreshTables(){
       }
     const list = t.tables || [];
     const filter = $('filterTables').value.toLowerCase();
+    const dbKey = String(currentDb || '');
+    const prev = lastTablesByDb[dbKey] || [];
+    const prevSet = new Set(prev);
+    const currentSet = new Set(list);
+    const newOnes = list.filter(name => !prevSet.has(name));
+    const oldOnes = list.filter(name => prevSet.has(name));
+    lastTablesByDb[dbKey] = list.slice();
+    const ordered = newOnes.concat(oldOnes);
     const container = $('tableList'); container.innerHTML = '';
-      list.filter(name => name.toLowerCase().includes(filter)).forEach(name => {
+      ordered.filter(name => name.toLowerCase().includes(filter)).forEach(name => {
+        const isNew = currentSet.has(name) && !prevSet.has(name);
+        const badge = isNew ? ' <span class="file-badge">novo</span>' : '';
         const li = document.createElement('li'); li.className='table-item';
-        li.innerHTML = `<div>${name}</div><div><button class="btn ghost" onclick="openTable(event,'${encodeURIComponent(name)}')">Abrir</button></div>`;
+        li.innerHTML = `<div>${name}${badge}</div><div><button class="btn ghost" onclick="openTable(event,'${encodeURIComponent(name)}')">Abrir</button></div>`;
         li.onclick = () => openTable(null, encodeURIComponent(name));
         container.appendChild(li);
       });
@@ -786,7 +1233,7 @@ async function refreshTables(){
 /* modal open/close */
 $('openConfig').addEventListener('click', ()=>{
   openModalById('configModal');
-  refreshUiState();
+  refreshUiState({sync:true});
 });
 const openPriorityBtn = $('openPriority');
 if(openPriorityBtn){
@@ -802,6 +1249,33 @@ if(openIndexBtn){
     refreshStatus();
   });
 }
+const openIndexInline = $('openIndexInline');
+if(openIndexInline){
+  openIndexInline.addEventListener('click', (ev)=>{
+    ev.preventDefault();
+    openModalById('indexModal');
+    refreshStatus();
+  });
+}
+const openStatusBtn = $('openStatus');
+if(openStatusBtn){
+  openStatusBtn.addEventListener('click', async ()=>{
+    openModalById('statusModal');
+    await refreshStatus();
+    await fetchServerLogs();
+    renderStatusModal();
+  });
+}
+const statusAlerts = $('statusAlerts');
+if(statusAlerts){
+  statusAlerts.addEventListener('click', async ()=>{
+    openModalById('statusModal');
+    await refreshStatus();
+    await fetchServerLogs();
+    renderStatusModal();
+  });
+}
+$('closeStatus').addEventListener('click', ()=> closeModal());
 $('closeConfig').addEventListener('click', ()=> closeModal());
 const closePriorityBtn = $('closePriority');
 if(closePriorityBtn) closePriorityBtn.addEventListener('click', ()=> closeModal());
@@ -813,12 +1287,25 @@ $('overlay').addEventListener('click', ()=> closeModal());
   if(el) el.addEventListener('click', ()=> scheduleStatusPoll());
 });
 
+const openFilesBtn = $('openFilesBtn');
+if(openFilesBtn){
+  openFilesBtn.addEventListener('click', ()=> setFilesPanelOpen(!filesPanelOpen));
+}
+const closeFilesBtn = $('closeFilesBtn');
+if(closeFilesBtn){
+  closeFilesBtn.addEventListener('click', ()=> setFilesPanelOpen(false));
+}
+
 /* upload/select/delete actions */
   $('uploadBtn').addEventListener('click', async ()=>{
     const fi = $('fileInput'); if(!fi.files.length){ $('uploadMsg').textContent='Selecione um arquivo.'; return; }
     const f = fi.files[0];
     if(!isFileAllowedForFlow(f.name, currentFlow)){
-      $('uploadMsg').textContent = currentFlow === 'access' ? 'Use .mdb ou .accdb neste fluxo.' : 'Use .duckdb, .db, .sqlite, .sqlite3 neste fluxo.';
+      const msg = currentFlow === 'access'
+        ? 'Use .mdb ou .accdb neste fluxo.'
+        : 'Use .duckdb, .db, .sqlite, .sqlite3 neste fluxo.';
+      $('uploadMsg').textContent = msg;
+      setFlowBanner(msg + ' Voce pode alternar o fluxo acima.', 'warn');
       return;
     }
     const sizeText = formatBytes(f.size || 0);
@@ -834,14 +1321,18 @@ $('overlay').addEventListener('click', ()=> closeModal());
         } else {
           msg.textContent = 'Upload ok: ' + (nameHint || f.name) + ' (' + sizeText + ')';
         }
+        setFlowBanner('', '');
       } else if(j && j.error){
         msg.textContent = 'Erro: ' + j.error;
+        setFlowBanner('Falha no upload. Verifique o arquivo e tente novamente.', 'error');
       } else {
         msg.textContent = 'Falha no upload';
+        setFlowBanner('Falha ao enviar arquivo. Tente novamente.', 'error');
       }
       await refreshUiState();
     } catch(e){
       $('uploadMsg').textContent='Erro no upload';
+      setFlowBanner('Erro no upload. Verifique o servidor e tente novamente.', 'error');
       logUi('ERROR', 'upload falhou');
     }
   });
@@ -860,13 +1351,16 @@ async function deleteUpload(nameEnc, btn){
     const j = await apiJSON('/admin/delete',{method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({filename: name})});
     if(j && j.ok){
       alert('Arquivo apagado');
+      setFlowBanner('', '');
       await refreshUiState();
     } else {
       const err = j && j.error ? j.error : 'falha ao excluir';
+      setFlowBanner('Nao foi possivel excluir. Verifique se o arquivo esta em uso.', 'warn');
       alert('Erro: ' + err);
     }
   } catch(e){
     if(msg) msg.textContent = 'Erro ao excluir';
+    setFlowBanner('Erro ao excluir. Tente novamente.', 'error');
     logUi('ERROR', 'delete falhou');
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = prevText || 'Excluir'; }
@@ -883,18 +1377,45 @@ async function selectUpload(nameEnc, btn){
     if(j && j.ok){
       if(msg) msg.textContent = 'DB selecionado: ' + name;
       manualFlowOverride = '';
+      setFlowBanner('', '');
       await refreshUiState();
       closeModal();
     } else {
       const err = j && j.error ? j.error : 'falha ao selecionar';
       if(msg) msg.textContent = 'Erro ao selecionar: ' + err;
+      setFlowBanner('Nao foi possivel selecionar o arquivo. Tente novamente.', 'error');
       logUi('ERROR', 'select db falhou');
     }
   } catch(e){
     if(msg) msg.textContent = 'Erro ao selecionar DB';
+    setFlowBanner('Erro ao selecionar DB. Verifique o servidor.', 'error');
     logUi('ERROR', 'select db falhou');
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = prevText || 'Selecionar'; }
+  }
+}
+
+async function selectDbFromTab(nameEnc){
+  const name = decodeURIComponent(nameEnc);
+  const msg = $('uploadMsg');
+  if(msg) msg.textContent = 'Selecionando: ' + name;
+  try{
+    const j = await apiJSON('/admin/select',{method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({filename: name})});
+    if(j && j.ok){
+      if(msg) msg.textContent = 'DB selecionado: ' + name;
+      manualFlowOverride = '';
+      setFlowBanner('', '');
+      await refreshUiState();
+    } else {
+      const err = j && j.error ? j.error : 'falha ao selecionar';
+      if(msg) msg.textContent = 'Erro ao selecionar: ' + err;
+      setFlowBanner('Nao foi possivel selecionar o arquivo. Tente novamente.', 'error');
+      logUi('ERROR', 'select db falhou');
+    }
+  }catch(e){
+    if(msg) msg.textContent = 'Erro ao selecionar DB';
+    setFlowBanner('Erro ao selecionar DB. Verifique o servidor.', 'error');
+    logUi('ERROR', 'select db falhou');
   }
 }
 
@@ -1346,5 +1867,5 @@ function exportResultsCsv(){
     }
   });
   logUi('INFO', 'modal exists=' + (!!$('configModal')));
-  refreshUiState();
+  refreshUiState({sync:true});
   scheduleStatusPoll();

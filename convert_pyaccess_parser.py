@@ -21,10 +21,11 @@ Dependencies:
 """
 
 import argparse
+import decimal
 import re
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
 import importlib
 
 
@@ -63,7 +64,59 @@ def sanitize_table_name(name):
     return name
 
 
-def convert_mdb_to_duckdb(mdb_path, duckdb_path, batch_mode=False):
+def _infer_column_type(values):
+    sample = [v for v in values if v is not None][:50]
+    if not sample:
+        return "VARCHAR"
+    if any(isinstance(v, (bytes, bytearray, memoryview)) for v in sample):
+        return "BLOB"
+    if all(isinstance(v, bool) for v in sample):
+        return "BOOLEAN"
+    if any(isinstance(v, (datetime, date)) for v in sample):
+        if any(isinstance(v, datetime) for v in sample):
+            return "TIMESTAMP"
+        return "DATE"
+    if any(isinstance(v, decimal.Decimal) for v in sample):
+        return "DECIMAL(38,10)"
+    has_int = any(isinstance(v, int) and not isinstance(v, bool) for v in sample)
+    has_float = any(isinstance(v, float) for v in sample)
+    has_str = any(isinstance(v, str) for v in sample)
+    if has_str and (has_int or has_float):
+        return "VARCHAR"
+    if has_float:
+        return "DOUBLE"
+    if has_int:
+        return "BIGINT"
+    return "VARCHAR"
+
+
+def _normalize_cell(value, target_type):
+    if value is None:
+        return None
+    if target_type == "BLOB":
+        if isinstance(value, memoryview):
+            return value.tobytes()
+        if isinstance(value, (bytes, bytearray)):
+            return bytes(value)
+        return str(value).encode("utf-8", errors="ignore")
+    if target_type == "BOOLEAN":
+        return bool(value)
+    if target_type in ("DATE", "TIMESTAMP"):
+        if isinstance(value, (datetime, date)):
+            return value
+        return str(value)
+    if target_type in ("BIGINT", "DOUBLE", "DECIMAL(38,10)"):
+        if isinstance(value, bool):
+            return int(value)
+        return value
+    if isinstance(value, (dict, list, tuple, set)):
+        return str(value)
+    return value
+
+
+def convert_mdb_to_duckdb(
+    mdb_path, duckdb_path, batch_mode=False, create_fulltext=False
+):
     """
     Convert an MDB file to a DuckDB database. Returns True on success, False on failure.
     Local imports are used to avoid requiring top-level imports elsewhere in the file.
@@ -187,6 +240,10 @@ def convert_mdb_to_duckdb(mdb_path, duckdb_path, batch_mode=False):
                     continue
 
                 sanitized_columns = [sanitize_table_name(col) for col in column_names]
+                column_types = {
+                    col: _infer_column_type(table_data.get(col, []))
+                    for col in column_names
+                }
 
                 # Determine row count from the first column
                 row_count = len(table_data[column_names[0]])
@@ -209,20 +266,38 @@ def convert_mdb_to_duckdb(mdb_path, duckdb_path, batch_mode=False):
                 # Drop existing table if present
                 conn.execute(f'DROP TABLE IF EXISTS "{final_table_name}"')
 
-                # Create table with all columns as VARCHAR to keep it simple
                 column_defs = ", ".join(
-                    [f'"{col}" VARCHAR' for col in sanitized_columns]
+                    [
+                        f'"{sanitize_table_name(col)}" {column_types.get(col, "VARCHAR")}'
+                        for col in column_names
+                    ]
                 )
                 conn.execute(f'CREATE TABLE "{final_table_name}" ({column_defs})')
 
                 placeholders = ", ".join(["?" for _ in sanitized_columns])
-                # Insert rows one by one (could be optimized with batch insert)
+                insert_sql = f'INSERT INTO "{final_table_name}" VALUES ({placeholders})'
+                batch_size = 1000
+                batch_rows = []
                 for i in range(row_count):
-                    row_data = [table_data[col][i] for col in column_names]
-                    conn.execute(
-                        f'INSERT INTO "{final_table_name}" VALUES ({placeholders})',
-                        row_data,
-                    )
+                    row_data = [
+                        _normalize_cell(table_data[col][i], column_types.get(col, "VARCHAR"))
+                        for col in column_names
+                    ]
+                    batch_rows.append(row_data)
+                    if len(batch_rows) >= batch_size:
+                        conn.executemany(insert_sql, batch_rows)
+                        batch_rows = []
+                if batch_rows:
+                    conn.executemany(insert_sql, batch_rows)
+
+        if create_fulltext:
+            try:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS _fulltext (table_name VARCHAR, pk_col VARCHAR, pk_value VARCHAR, row_offset BIGINT, content_norm TEXT, row_json TEXT)"
+                )
+            except Exception as e:
+                if not batch_mode:
+                    print(f"Warning: _fulltext creation failed: {e}")
 
                 conn.execute(
                     "INSERT INTO _metadata VALUES (?, ?, ?, ?, ?)",
@@ -278,10 +353,17 @@ def main():
     parser.add_argument(
         "--batch", "-b", action="store_true", help="Batch mode (less verbose output)"
     )
+    parser.add_argument(
+        "--fulltext",
+        action="store_true",
+        help="Create _fulltext table (empty) after import",
+    )
 
     args = parser.parse_args()
 
-    success = convert_mdb_to_duckdb(args.input, args.output, args.batch)
+    success = convert_mdb_to_duckdb(
+        args.input, args.output, args.batch, args.fulltext
+    )
     sys.exit(0 if success else 1)
 
 

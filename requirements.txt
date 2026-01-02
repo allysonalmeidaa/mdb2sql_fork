@@ -2,6 +2,7 @@ duckdb
 flask
 rapidfuzz
 pyodbc
+pypyodbc
 pandas
 numpy
 matplotlib

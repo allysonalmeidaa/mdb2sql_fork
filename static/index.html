@@ -5,78 +5,305 @@
   <title>Busca DuckDB - Painel</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    :root { --bg:#f6f7fb; --card:#fff; --muted:#666; --primary:#0b63d6; --accent:#ffcc00; }
-    body{ font-family: Inter, Roboto, Arial, sans-serif; margin:0; background:var(--bg); color:#111; }
-    header{ background: linear-gradient(90deg,#fff 0%, #f2f6ff 100%); padding:12px 18px; display:flex; align-items:center; gap:12px; border-bottom:1px solid #e6e9ef; }
-    header h1{ font-size:18px; margin:0; }
-    .top-right{ margin-left:auto; display:flex; gap:10px; align-items:center; }
-    .badge{ font-size:13px; color:var(--muted); }
-    .btn{ background:var(--primary); color:#fff; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; }
-    .btn.ghost{ background:transparent; color:var(--primary); border:1px solid #d7e3ff; }
-    .btn.attention{ animation:pulse 1.5s ease-in-out infinite; }
-    @keyframes pulse{ 0%{ box-shadow:0 0 0 0 rgba(255,204,0,0.5); } 70%{ box-shadow:0 0 0 8px rgba(255,204,0,0); } 100%{ box-shadow:0 0 0 0 rgba(255,204,0,0); } }
-    .container{ display:flex; gap:16px; padding:14px; }
-    aside{ width:260px; background:var(--card); border-radius:8px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,0.03); height:calc(100vh - 96px); overflow:auto; }
-    main{ flex:1; min-width:0; }
-    .search-row{ display:flex; gap:8px; align-items:center; margin-bottom:12px; }
-    input[type=text], input[type=number], select { padding:8px; border:1px solid #dfe6f0; border-radius:6px; font-size:14px; }
-    .card{ background:var(--card); padding:10px; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,0.03); margin-bottom:12px; }
-    .small{ font-size:13px; color:var(--muted); }
-    .muted{ color:var(--muted); font-size:12px; }
-    .flow-hint{ background:#eef7ff; border:1px solid #cfe0ff; color:#223; padding:8px 10px; border-radius:6px; margin-bottom:10px; }
-    ul.table-list{ list-style:none; padding:0; margin:0; }
-    li.table-item{ padding:8px; border-bottom:1px solid #eef2f6; display:flex; justify-content:space-between; align-items:center; }
-    .config-modal, .overlay{ display:none; }
-    .modal-open .overlay{ display:block; position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:50; }
-    .modal-open .config-modal{ display:block; position:fixed; z-index:60; left:50%; top:50%; transform:translate(-50%,-50%); width:960px; max-width:95%; max-height:90vh; overflow:auto; background:var(--card); padding:16px; border-radius:8px; box-shadow:0 8px 20px rgba(0,0,0,0.2); }
-    .progress-wrapper{ background:#f0f3f8; border-radius:6px; padding:6px; margin-top:8px; }
-    .progress-bar{ height:14px; background:linear-gradient(90deg,#0b63d6,#3aa0ff); border-radius:6px; width:0%; }
-    table.results{ width:100%; border-collapse:collapse; margin-top:8px; font-size:13px; }
-    table.results th, table.results td{ border:1px solid #eef2f6; padding:8px; text-align:left; vertical-align:top; }
-    mark{ background:var(--accent); padding:0 2px; border-radius:2px; }
-    .tabs{ display:flex; gap:6px; margin:8px 0 10px 0; }
-    .tab-btn{ background:#f4f7ff; color:#223; border:1px solid #cfe0ff; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:12px; }
-    .tab-btn.active{ background:#0a55b5; color:#fff; border-color:#0a55b5; }
-    .flow-panel{ display:none; background:#f8fafc; border:1px solid #eef2f6; padding:8px 10px; border-radius:6px; margin-bottom:8px; }
-    #indexPanel{ display:none; }
-    body.db-duckdb #indexPanel{ display:block; }
-    body.flow-duckdb #flowDuckdb{ display:block; }
-    body.flow-access #flowAccess{ display:block; }
-    body.flow-duckdb .flow-access-only{ display:none; }
-    body.flow-access .flow-duckdb-only{ display:none; }
-    .upload-row{ display:flex; justify-content:space-between; align-items:center; padding:6px 0; }
-    .upload-row.selected{ background:#eef7ff; border-left:3px solid #0b63d6; padding-left:8px; }
-    .file-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:8px 0; border-bottom:1px solid #eef2f6; }
-    .file-row:last-child{ border-bottom:none; }
-    .file-row.selected{ background:#eef7ff; border-left:3px solid #0b63d6; padding-left:8px; }
-    .file-name{ font-weight:600; }
-    .file-meta{ font-size:12px; color:var(--muted); margin-top:2px; }
-    .file-status{ font-size:11px; color:var(--muted); margin-top:2px; }
-    .file-badge{ background:#f0f3f8; color:#223; border-radius:999px; padding:2px 6px; font-size:11px; margin-left:6px; }
-    .file-actions{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-    .selected-badge{ background:#e6f4ff; color:#0b63d6; border-radius:999px; padding:2px 6px; font-size:11px; }
-    body.needs-selection .select-btn{ border-color:#ffcc00; box-shadow:0 0 0 1px #ffcc00 inset; }
-    .select-btn.selected{ background:#0b63d6; color:#fff; border-color:#0b63d6; }
-    .modal-header{ display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; background:var(--card); padding:6px 0 10px; margin-bottom:8px; border-bottom:1px solid #eef2f6; z-index:2; }
-    .modal-header h3{ margin:0; }
-    .btn.small{ padding:4px 8px; font-size:12px; }
-    .flow-status{ background:#f0f3f8; border:1px solid #dfe6f0; padding:6px 8px; border-radius:6px; margin-bottom:8px; }
-    details.advanced{ margin-top:8px; }
-    details.advanced > summary{ cursor:pointer; font-weight:600; color:#223; }
-    .advanced-body{ margin-top:8px; }
+    :root {
+      --bg: #171a1f;
+      --bg-accent: #1e222a;
+      --card: #232a34;
+      --ink: #eef2f8;
+      --muted: #a7b0bf;
+      --primary: #1f4ed8;
+      --primary-ink: #e9efff;
+      --accent: #3e7bff;
+      --danger: #d75a4a;
+      --border: #2f3642;
+      --shadow: 0 18px 36px rgba(9, 12, 17, 0.4);
+      --shadow-soft: 0 6px 16px rgba(9, 12, 17, 0.3);
+      --radius: 14px;
+      --radius-sm: 10px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Space Grotesk", "IBM Plex Sans", "Segoe UI", sans-serif;
+      margin: 0;
+      background: radial-gradient(900px 600px at 10% 10%, #1c2330 0%, transparent 55%),
+        radial-gradient(700px 500px at 90% 0%, #1b2130 0%, transparent 50%),
+        linear-gradient(180deg, #14171c 0%, #171a1f 70%, #171a1f 100%);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(transparent 70%, rgba(255, 255, 255, 0.04) 72%) 0 0/26px 26px,
+        radial-gradient(transparent 72%, rgba(255, 255, 255, 0.03) 74%) 13px 13px/26px 26px;
+      pointer-events: none;
+      opacity: 0.25;
+      z-index: 0;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: linear-gradient(90deg, rgba(26, 32, 42, 0.96) 0%, rgba(24, 30, 40, 0.96) 100%);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 8px 18px rgba(8, 12, 18, 0.35);
+      backdrop-filter: blur(8px);
+    }
+    .brand-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: conic-gradient(from 45deg, #2b5cff, #79a0ff, #2b5cff);
+      box-shadow: 0 0 0 4px rgba(43, 92, 255, 0.2);
+    }
+    header h1 { font-size: 20px; margin: 0; letter-spacing: 0.4px; }
+    header .subtitle { font-size: 13px; color: var(--muted); max-width: 380px; }
+    .top-right { margin-left: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .badge {
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(43, 92, 255, 0.12);
+      border: 1px solid rgba(43, 92, 255, 0.35);
+      padding: 4px 8px;
+      border-radius: 999px;
+    }
+    .badge.clickable { cursor: pointer; }
+    .btn {
+      background: var(--primary);
+      color: var(--primary-ink);
+      border: none;
+      padding: 8px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      box-shadow: 0 10px 18px rgba(31, 78, 216, 0.35);
+      transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 14px 24px rgba(31, 78, 216, 0.45); }
+    .btn.ghost {
+      background: transparent;
+      color: var(--primary);
+      border: 1px solid rgba(43, 92, 255, 0.5);
+      box-shadow: none;
+    }
+    .btn.attention { animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(244, 180, 0, 0.5); }
+      70% { box-shadow: 0 0 0 10px rgba(244, 180, 0, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(244, 180, 0, 0); }
+    }
+    .container { position: relative; z-index: 1; display: flex; gap: 18px; padding: 20px 24px 40px; }
+    aside {
+      width: 270px;
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow-soft);
+      height: calc(100vh - 120px);
+      overflow: auto;
+      border: 1px solid var(--border);
+    }
+    main { flex: 1; min-width: 0; }
+    .search-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    input[type=text], input[type=number], select {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 14px;
+      background: #1f2630;
+      color: var(--ink);
+    }
+    .card {
+      background: var(--card);
+      padding: 14px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+      animation: rise 0.5s ease;
+      animation-delay: calc(var(--stagger, 0) * 0.08s);
+      animation-fill-mode: both;
+    }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .small { font-size: 13px; color: var(--muted); }
+    .muted { color: var(--muted); font-size: 12px; }
+    .flow-hint {
+      background: rgba(43, 92, 255, 0.12);
+      border: 1px solid rgba(43, 92, 255, 0.35);
+      color: #dbe6ff;
+      padding: 10px 12px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+    .flow-hint.info { background: rgba(43, 92, 255, 0.12); border-color: rgba(43, 92, 255, 0.4); color: #dbe6ff; }
+    .flow-hint.warn { background: rgba(255, 196, 77, 0.12); border-color: rgba(255, 196, 77, 0.4); color: #ffe4b3; }
+    .flow-hint.error { background: rgba(215, 90, 74, 0.18); border-color: rgba(215, 90, 74, 0.5); color: #ffd3cc; }
+    .controls-disabled { opacity: 0.5; pointer-events: none; }
+    .status-deck {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .status-tile {
+      background: #1f2630;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+      box-shadow: var(--shadow-soft);
+    }
+    .status-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+    .status-value { font-size: 16px; font-weight: 700; margin-top: 6px; }
+    .status-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .flow-steps { display: grid; gap: 10px; }
+    .steps-title { font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .steps-grid { display: grid; gap: 8px; }
+    .step {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px dashed var(--border);
+      background: #1f2630;
+      font-size: 13px;
+    }
+    .step.done { border-style: solid; border-color: rgba(43, 92, 255, 0.4); background: rgba(43, 92, 255, 0.12); }
+    .step.active { border-style: solid; border-color: rgba(255, 196, 77, 0.6); background: rgba(255, 196, 77, 0.12); }
+    .step.warn { border-style: solid; border-color: rgba(215, 90, 74, 0.5); background: rgba(215, 90, 74, 0.12); }
+    ul.table-list { list-style: none; padding: 0; margin: 0; }
+    li.table-item { padding: 8px; border-bottom: 1px solid #efede7; display: flex; justify-content: space-between; align-items: center; }
+    .db-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .db-tab {
+      border: 1px solid var(--border);
+      background: #1f2630;
+      color: var(--ink);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      cursor: pointer;
+      max-width: 100%;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .db-tab.active { background: #1f4ed8; border-color: #1f4ed8; color: #fff; }
+    .db-tab-help { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .config-modal, .overlay { display: none; }
+    .modal-open .overlay { display: block; position: fixed; inset: 0; background: rgba(6, 8, 12, 0.6); z-index: 50; }
+    .modal-open .config-modal {
+      display: block;
+      position: fixed;
+      z-index: 60;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 980px;
+      max-width: 95%;
+      max-height: 90vh;
+      overflow: auto;
+      background: var(--card);
+      padding: 18px;
+      border-radius: var(--radius);
+      box-shadow: 0 12px 30px rgba(10, 15, 20, 0.25);
+      border: 1px solid var(--border);
+    }
+    .progress-wrapper { background: #1c222b; border-radius: 10px; padding: 8px; margin-top: 8px; }
+    .progress-bar { height: 12px; background: linear-gradient(90deg, #1f4ed8, #3e7bff); border-radius: 999px; width: 0%; }
+    table.results { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+    table.results th, table.results td { border: 1px solid #efece6; padding: 8px; text-align: left; vertical-align: top; }
+    mark { background: rgba(62, 123, 255, 0.35); padding: 0 2px; border-radius: 3px; color: #e9efff; }
+    .tabs { display: flex; gap: 8px; margin: 10px 0 12px 0; flex-wrap: wrap; }
+    .tab-btn {
+      background: #1f2630;
+      color: var(--ink);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .tab-btn.active { background: #1f4ed8; color: #fff; border-color: #1f4ed8; }
+    .flow-panel { display: none; background: #1f2630; border: 1px solid var(--border); padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
+    #indexPanel { display: none; }
+    body.db-duckdb #indexPanel { display: block; }
+    body.flow-duckdb #flowDuckdb { display: block; }
+    body.flow-access #flowAccess { display: block; }
+    body.flow-duckdb .flow-access-only { display: none; }
+    body.flow-access .flow-duckdb-only { display: none; }
+    .upload-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+    .upload-row.selected { background: rgba(43, 92, 255, 0.12); border-left: 3px solid #3e7bff; padding-left: 8px; }
+    .file-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid #efece6; }
+    .file-row:last-child { border-bottom: none; }
+    .file-row.selected { background: rgba(43, 92, 255, 0.12); border-left: 3px solid #3e7bff; padding-left: 8px; }
+    .file-name { font-weight: 600; }
+    .file-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .file-status { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .file-badge { background: #f0ece3; color: #223; border-radius: 999px; padding: 2px 6px; font-size: 11px; margin-left: 6px; }
+    .file-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    a { color: #9bb3ff; }
+    a:hover { color: #c2d1ff; }
+    .selected-badge { background: rgba(43, 92, 255, 0.2); color: #dbe6ff; border-radius: 999px; padding: 2px 6px; font-size: 11px; }
+    body.needs-selection .select-btn { border-color: #3e7bff; box-shadow: 0 0 0 1px #3e7bff inset; }
+    .select-btn.selected { background: #1f4ed8; color: #fff; border-color: #1f4ed8; }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      background: var(--card);
+      padding: 6px 0 10px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      z-index: 2;
+    }
+    .modal-header h3 { margin: 0; }
+    .btn.small { padding: 4px 10px; font-size: 12px; }
+    .flow-status { background: #f0ece3; border: 1px solid var(--border); padding: 8px 10px; border-radius: 10px; margin-bottom: 10px; }
+    details.advanced { margin-top: 8px; }
+    details.advanced > summary { cursor: pointer; font-weight: 600; color: #223; }
+    .advanced-body { margin-top: 8px; }
+    #filesPanel[hidden] { display: none; }
+    @media (max-width: 980px) {
+      .container { flex-direction: column; padding: 16px; }
+      aside { width: 100%; height: auto; }
+      header { flex-wrap: wrap; }
+      .top-right { width: 100%; justify-content: flex-start; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .card, .btn { animation: none; transition: none; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>Busca DuckDB - Painel</h1>
-    <div class="small">Ferramenta local para buscas tolerantes (fuzzy)</div>
+    <div class="brand-dot"></div>
+    <div>
+      <h1>Busca DuckDB — Painel</h1>
+      <div class="subtitle">Ferramenta local para busca tolerante, conversao e indexacao de bases Access e DuckDB.</div>
+    </div>
     <div class="top-right">
       <div id="currentDb" class="badge">DB: carregando...</div>
       <div id="modeBadge" class="badge">Modo: -</div>
       <div id="indexStatus" class="badge">Status: --</div>
+      <div id="statusAlerts" class="badge clickable" title="Ver detalhes">Alertas: -</div>
+      <button id="openStatus" class="btn ghost">Detalhes</button>
       <button id="openConfig" class="btn">Selecionar DB</button>
       <button id="openPriority" class="btn ghost">Prioridade</button>
       <button id="openIndex" class="btn ghost">Indice _fulltext</button>
+      <button id="openFilesBtn" class="btn ghost">Arquivos</button>
       <button id="refreshBtn" class="btn ghost">Atualizar</button>
     </div>
   </header>
@@ -87,32 +314,67 @@
         <strong>Tabelas</strong>
         <button id="refreshTables" class="btn ghost">Atualizar</button>
       </div>
+      <div id="dbTabs" class="db-tabs"></div>
+      <div id="dbTabHelp" class="db-tab-help">Selecione um banco para ver as tabelas.</div>
       <input id="filterTables" placeholder="Filtrar tabelas..." style="width:100%; margin-bottom:8px;" />
       <ul id="tableList" class="table-list"></ul>
       <div style="margin-top:10px" class="small">Clique em uma tabela para abri-la na visualizacao completa.</div>
     </aside>
 
     <main>
-      <div class="card" id="filesPanel">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap">
-          <div><strong>Arquivos</strong> <span id="filesMeta" class="small"></span></div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <label class="small">Ordenar:</label>
-            <select id="filesSort">
-              <option value="name_asc">Nome A-Z</option>
-              <option value="name_desc">Nome Z-A</option>
-              <option value="date_desc">Data recente</option>
-              <option value="date_asc">Data antiga</option>
-            </select>
-            <button id="refreshFilesBtn" class="btn ghost">Atualizar lista</button>
+      <div class="card" style="--stagger:2">
+        <div id="flowHint" class="flow-hint" style="display:none"></div>
+        <div id="flowBanner" class="flow-hint" style="display:none"></div>
+        <div class="card status-deck" id="statusDeck" style="--stagger:3">
+          <div class="status-tile">
+            <div class="status-label">DB ativo</div>
+            <div id="statusDbValue" class="status-value">-</div>
+            <div id="statusDbMeta" class="status-meta">Selecione um arquivo</div>
+          </div>
+          <div class="status-tile">
+            <div class="status-label">Conversao</div>
+            <div id="statusConvValue" class="status-value">-</div>
+            <div id="statusConvMeta" class="status-meta">Nenhuma conversao</div>
+          </div>
+          <div class="status-tile">
+            <div class="status-label">Indice _fulltext</div>
+            <div id="statusIndexValue" class="status-value">-</div>
+            <div id="statusIndexMeta" class="status-meta">Aguardando</div>
+          </div>
+          <div class="status-tile">
+            <div class="status-label">Busca</div>
+            <div id="statusSearchValue" class="status-value">-</div>
+            <div id="statusSearchMeta" class="status-meta">Sem DB</div>
           </div>
         </div>
-        <div id="filesList" class="muted">Carregando...</div>
-      </div>
-
-      <div class="card">
-        <div id="flowHint" class="flow-hint" style="display:none"></div>
+        <div class="card flow-steps" id="flowSteps" style="--stagger:4">
+          <div class="steps-title">Fluxo atual</div>
+          <div class="steps-grid">
+            <div class="step" id="stepSelect">1. Selecionar DB</div>
+            <div class="step" id="stepConvert">2. Converter ou validar</div>
+            <div class="step" id="stepIndex">3. Indexar _fulltext <button id="openIndexInline" class="btn ghost small" type="button">Abrir</button></div>
+            <div class="step" id="stepSearch">4. Buscar resultados</div>
+          </div>
+        </div>
         <div id="selectedMainInfo" class="muted" style="margin-bottom:8px"></div>
+        <div class="card" id="filesPanel" style="margin-top:12px" hidden>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap">
+            <div><strong>Gestao de arquivos</strong> <span id="filesMeta" class="small"></span></div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <label class="small">Ordenar:</label>
+              <select id="filesSort">
+                <option value="name_asc">Nome A-Z</option>
+                <option value="name_desc">Nome Z-A</option>
+                <option value="date_desc">Data recente</option>
+                <option value="date_asc">Data antiga</option>
+              </select>
+              <button id="refreshFilesBtn" class="btn ghost">Atualizar lista</button>
+              <button id="closeFilesBtn" class="btn ghost small" type="button">Fechar</button>
+            </div>
+          </div>
+          <div id="filesHelpText" class="small" style="margin-bottom:8px"></div>
+          <div id="filesList" class="muted">Carregando...</div>
+        </div>
         <div class="search-row">
           <input id="q" type="text" placeholder="Digite termo (ex: svp) - Enter para pesquisar" style="flex:1" />
           <button id="searchBtn" class="btn">Pesquisar</button>
@@ -179,10 +441,12 @@
       <button class="tab-btn" data-flow="access">Access (conversao)</button>
     </div>
     <div id="flowDuckdb" class="flow-panel">
-      <div class="small"><strong>Fluxo 1:</strong> selecione ou envie um .duckdb. Para buscar, _fulltext e obrigatorio.</div>
+      <div class="small"><strong>Fluxo 1:</strong> selecione ou envie um .duckdb. Para buscar, o _fulltext precisa estar criado.</div>
+      <div class="small" style="margin-top:6px">Dica: use o botao "Indice _fulltext" quando a busca estiver bloqueada.</div>
     </div>
     <div id="flowAccess" class="flow-panel">
       <div class="small"><strong>Fluxo 2:</strong> envie .mdb/.accdb, aguarde conversao para .duckdb e rode indexacao _fulltext.</div>
+      <div id="conversionModeText" class="small" style="margin-top:6px"></div>
     </div>
 
     <div style="font-weight:600;margin-top:4px">1) Selecionar DB</div>
@@ -263,6 +527,32 @@
     <hr/>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div id="adminStatus" class="muted">Status: carregando...</div>
+    </div>
+  </div>
+
+  <div class="config-modal" id="statusModal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-header">
+      <h3>Alertas e logs</h3>
+      <button id="closeStatus" class="btn ghost small" title="Fechar">Fechar</button>
+    </div>
+    <div class="small" style="margin:4px 0 10px 0">
+      Resumo de problemas por gravidade e registros recentes do cliente/servidor.
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:6px">Critico</div>
+      <ul id="statusCriticalList" class="muted"></ul>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:6px">Avisos</div>
+      <ul id="statusWarnList" class="muted"></ul>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:6px">Info</div>
+      <ul id="statusInfoList" class="muted"></ul>
+    </div>
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:6px">Logs recentes</div>
+      <div id="statusLogList" class="muted" style="white-space:pre-wrap"></div>
     </div>
   </div>
 

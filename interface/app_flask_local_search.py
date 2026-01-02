@@ -24,7 +24,8 @@ import sys
 import threading
 import time
 import traceback
-from datetime import datetime
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
@@ -55,6 +56,7 @@ def _setup_event_logger():
 
 
 _EVENT_LOG = _setup_event_logger()
+_RECENT_LOGS = deque(maxlen=200)
 
 
 def _safe_ascii(value):
@@ -64,9 +66,17 @@ def _safe_ascii(value):
         return "?"
 
 
-def log_event(message):
+def log_event(message, level="info"):
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _RECENT_LOGS.append({"ts": ts, "level": level, "message": message})
     try:
-        _EVENT_LOG.info(_safe_ascii(message))
+        line = _safe_ascii(message)
+        if level in ("error", "critical"):
+            _EVENT_LOG.error(line)
+        elif level in ("warn", "warning"):
+            _EVENT_LOG.warning(line)
+        else:
+            _EVENT_LOG.info(line)
     except Exception:
         pass
 
@@ -146,8 +156,11 @@ def load_config():
     return {
         "db_path": "",
         "priority_tables": [],
+        "priority_tables_by_db": {},
         "auto_index_after_convert": True,
         "remember_last_db": False,
+        "conversion_mode": "odbc_preferred",
+        "odbc_enabled": True,
     }
 
 
@@ -168,11 +181,47 @@ else:
     if cleaned != cfg["priority_tables"]:
         cfg["priority_tables"] = cleaned
         changed_cfg = True
+if not isinstance(cfg.get("priority_tables_by_db"), dict):
+    cfg["priority_tables_by_db"] = {}
+    changed_cfg = True
+else:
+    cleaned_map = {}
+    for key, value in cfg.get("priority_tables_by_db", {}).items():
+        if not isinstance(value, list):
+            continue
+        key_str = str(key)
+        try:
+            if not Path(key_str).exists():
+                continue
+        except Exception:
+            continue
+        cleaned_list = [t for t in value if t and t != "None"]
+        cleaned_map[key_str] = cleaned_list
+    if cleaned_map != cfg["priority_tables_by_db"]:
+        cfg["priority_tables_by_db"] = cleaned_map
+        changed_cfg = True
 if "auto_index_after_convert" not in cfg:
     cfg["auto_index_after_convert"] = True
     changed_cfg = True
 if "remember_last_db" not in cfg:
     cfg["remember_last_db"] = False
+    changed_cfg = True
+if "conversion_mode" not in cfg:
+    cfg["conversion_mode"] = "odbc_preferred"
+    changed_cfg = True
+if "odbc_enabled" not in cfg:
+    cfg["odbc_enabled"] = True
+    changed_cfg = True
+if not isinstance(cfg.get("conversion_mode"), str):
+    cfg["conversion_mode"] = "odbc_preferred"
+    changed_cfg = True
+else:
+    mode = cfg.get("conversion_mode", "").strip().lower()
+    if mode not in ("odbc_preferred", "pure_only"):
+        cfg["conversion_mode"] = "odbc_preferred"
+        changed_cfg = True
+if not isinstance(cfg.get("odbc_enabled"), bool):
+    cfg["odbc_enabled"] = bool(cfg.get("odbc_enabled", True))
     changed_cfg = True
 if not cfg.get("remember_last_db", False) and cfg.get("db_path"):
     cfg["db_path"] = ""
@@ -181,6 +230,10 @@ if changed_cfg:
     save_config(cfg)
 
 _runtime_db_path = None
+
+
+def odbc_allowed():
+    return bool(cfg.get("odbc_enabled", True))
 
 
 def remember_last_db_enabled():
@@ -208,6 +261,25 @@ def set_db_path(p):
         if cfg.get("db_path"):
             cfg["db_path"] = ""
         save_config(cfg)
+
+
+def get_priority_tables(dbpath=None):
+    dbpath = dbpath or get_db_path()
+    if dbpath:
+        per_db = cfg.get("priority_tables_by_db", {})
+        if isinstance(per_db, dict):
+            return per_db.get(str(dbpath), [])
+    return cfg.get("priority_tables", []) or []
+
+
+def set_priority_tables(tables, dbpath=None):
+    dbpath = dbpath or get_db_path()
+    if dbpath:
+        if not isinstance(cfg.get("priority_tables_by_db"), dict):
+            cfg["priority_tables_by_db"] = {}
+        cfg["priority_tables_by_db"][str(dbpath)] = tables
+    else:
+        cfg["priority_tables"] = tables
 
 
 def clear_db_path():
@@ -265,6 +337,47 @@ def safe_int(value, default):
         return ivalue if ivalue > 0 else default
     except Exception:
         return default
+
+
+def resolve_upload_file(filename):
+    if not filename:
+        return None, "filename required"
+    name = str(filename).strip()
+    if not name:
+        return None, "filename required"
+    base_dir = UPLOAD_DIR.resolve()
+    candidate = UPLOAD_DIR / name
+    try:
+        candidate.resolve().relative_to(base_dir)
+    except Exception:
+        return None, "invalid filename or path"
+    if candidate.exists():
+        return candidate, None
+    for p in UPLOAD_DIR.iterdir():
+        if p.is_file() and p.name == name:
+            return p, None
+    normalized = " ".join(name.split()).casefold()
+    for p in UPLOAD_DIR.iterdir():
+        if not p.is_file():
+            continue
+        if " ".join(p.name.split()).casefold() == normalized:
+            return p, None
+    return candidate, "file not found"
+
+
+def iter_upload_files_sorted():
+    entries = []
+    for p in UPLOAD_DIR.iterdir():
+        if not p.is_file():
+            continue
+        try:
+            mtime = p.stat().st_mtime
+        except Exception:
+            mtime = 0
+        has_space = " " in p.name
+        entries.append((has_space, -mtime, p.name.lower(), p))
+    entries.sort()
+    return [p for _, _, _, p in entries]
 
 
 # Cache simples mas efetivo para tabelas
@@ -327,6 +440,8 @@ def list_tables_duckdb(path):
 
 def list_tables_access(path):
     """Lista tabelas de um banco Access via ODBC (pyodbc)."""
+    if not odbc_allowed():
+        raise RuntimeError("ODBC disabled by config")
     if pyodbc is None:
         raise RuntimeError("pyodbc not installed")
     conn = None
@@ -387,25 +502,36 @@ def list_tables_access(path):
 @app.route("/admin/list_uploads", methods=["GET"])
 def admin_list_uploads():
     files = []
-    for p in sorted(UPLOAD_DIR.iterdir(), key=lambda x: x.name):
-        if p.is_file():
-            st = p.stat()
-            files.append(
-                {
-                    "name": p.name,
-                    "path": str(p),
-                    "size": st.st_size,
-                    "modified": datetime.fromtimestamp(st.st_mtime).isoformat(),
-                    "ext": p.suffix.lower(),
-                }
-            )
+    for p in iter_upload_files_sorted():
+        st = p.stat()
+        files.append(
+            {
+                "name": p.name,
+                "path": str(p),
+                "size": st.st_size,
+                "modified": datetime.fromtimestamp(st.st_mtime).isoformat(),
+                "ext": p.suffix.lower(),
+            }
+        )
+    current_db = get_db_path()
+    priority_tables = get_priority_tables()
+    priority_tables_display = priority_tables
+    if current_db and is_duckdb_path(current_db) and Path(current_db).exists():
+        try:
+            all_tables = list_tables_duckdb(current_db)
+            if all_tables and len(all_tables) <= 1 and set(priority_tables) >= set(all_tables):
+                priority_tables_display = []
+        except Exception:
+            pass
     return jsonify(
         {
             "uploads": files,
-            "current_db": get_db_path(),
-            "priority_tables": cfg.get("priority_tables", []),
+            "current_db": current_db,
+            "priority_tables": priority_tables_display,
             "auto_index_after_convert": cfg.get("auto_index_after_convert", True),
             "remember_last_db": cfg.get("remember_last_db", False),
+            "conversion_mode": cfg.get("conversion_mode", "odbc_preferred"),
+            "odbc_enabled": cfg.get("odbc_enabled", True),
         }
     )
 
@@ -447,9 +573,11 @@ def admin_status():
             status["error_fulltext"] = str(e)
     with convert_lock:
         status["conversion"] = dict(convert_status)
-    status["priority_tables"] = cfg.get("priority_tables", [])
+    status["priority_tables"] = get_priority_tables()
     status["auto_index_after_convert"] = cfg.get("auto_index_after_convert", True)
     status["remember_last_db"] = cfg.get("remember_last_db", False)
+    status["conversion_mode"] = cfg.get("conversion_mode", "odbc_preferred")
+    status["odbc_enabled"] = cfg.get("odbc_enabled", True)
     return jsonify(status)
 
 
@@ -498,16 +626,15 @@ def api_upload():
 @app.route("/api/list_uploads", methods=["GET"])
 def api_list_uploads():
     files = []
-    for p in sorted(UPLOAD_DIR.iterdir(), key=lambda x: x.name):
-        if p.is_file():
-            st = p.stat()
-            files.append(
-                {
-                    "name": p.name,
-                    "size": st.st_size,
-                    "modified": datetime.fromtimestamp(st.st_mtime).isoformat(),
-                }
-            )
+    for p in iter_upload_files_sorted():
+        st = p.stat()
+        files.append(
+            {
+                "name": p.name,
+                "size": st.st_size,
+                "modified": datetime.fromtimestamp(st.st_mtime).isoformat(),
+            }
+        )
     return jsonify({"files": files})
 
 
@@ -515,11 +642,9 @@ def api_list_uploads():
 def api_select_db():
     data = request.get_json() or {}
     filename = data.get("filename")
-    if not filename:
-        return jsonify({"error": "filename required"}), 400
-    fpath = UPLOAD_DIR / secure_filename(filename)
-    if not fpath.exists():
-        return jsonify({"error": "file not found"}), 404
+    fpath, err = resolve_upload_file(filename)
+    if err:
+        return jsonify({"error": err}), 400 if err != "file not found" else 404
     ext = fpath.suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         return jsonify({"error": f"Invalid file type: {ext}"}), 400
@@ -599,6 +724,8 @@ def admin_upload():
                         str(dest),
                         str(out_duckdb),
                         chunk_size=20000,
+                        conversion_mode=cfg.get("conversion_mode", "odbc_preferred"),
+                        odbc_enabled=cfg.get("odbc_enabled", True),
                         progress_callback=progress_cb,
                     )
                     with convert_lock:
@@ -611,6 +738,11 @@ def admin_upload():
                     log_event(
                         f"event=convert_done ok={bool(ok)} output={out_duckdb} msg={msg}"
                     )
+                    if not ok:
+                        log_event(
+                            f"event=convert_failed output={out_duckdb} msg={msg}",
+                            level="error",
+                        )
                     if ok:
                         set_db_path(str(out_duckdb))
                         log_event(f"event=db_select path={out_duckdb}")
@@ -666,7 +798,7 @@ def admin_upload():
                         convert_status["running"] = False
                         convert_status["ok"] = False
                         convert_status["msg"] = f"exception: {e}"
-                    log_event(f"event=convert_error input={dest} err={e}")
+                    log_event(f"event=convert_error input={dest} err={e}", level="error")
 
             convert_thread = threading.Thread(target=run_convert, daemon=True)
             convert_thread.start()
@@ -685,11 +817,10 @@ def admin_upload():
 def admin_select():
     data = request.get_json() or {}
     filename = data.get("filename")
-    if not filename:
-        return jsonify({"error": "filename required"}), 400
-    fpath = UPLOAD_DIR / secure_filename(filename)
-    if not fpath.exists():
-        return jsonify({"error": "arquivo não encontrado"}), 404
+    fpath, err = resolve_upload_file(filename)
+    if err:
+        msg = "arquivo não encontrado" if err == "file not found" else err
+        return jsonify({"error": msg}), 400 if err != "file not found" else 404
     # set as current DB (duckdb or access). Frontend /api/tables will handle listing with fallback.
     set_db_path(str(fpath))
     log_event(f"event=db_select path={fpath}")
@@ -702,33 +833,55 @@ def admin_delete():
     filename = data.get("filename")
     if not filename:
         return jsonify({"error": "filename required"}), 400
-    safe = secure_filename(filename)
-    target = UPLOAD_DIR / safe
+    target, err = resolve_upload_file(filename)
+    if err:
+        msg = "arquivo não encontrado" if err == "file not found" else err
+        return jsonify({"error": msg}), 400 if err != "file not found" else 404
     try:
-        target.resolve().relative_to(UPLOAD_DIR.resolve())
-    except Exception:
-        return jsonify({"error": "invalid filename or path"}), 400
-    if not target.exists():
-        return jsonify({"error": "arquivo não encontrado"}), 404
-    try:
+        def unlink_with_retry(path_obj, retries=3):
+            for attempt in range(retries):
+                try:
+                    path_obj.unlink()
+                    return True
+                except PermissionError:
+                    if attempt >= retries - 1:
+                        raise
+                    time.sleep(0.2 * (attempt + 1))
+                except OSError as exc:
+                    if getattr(exc, "winerror", None) == 32 and attempt < retries - 1:
+                        time.sleep(0.2 * (attempt + 1))
+                        continue
+                    raise
+            return False
+
         current = get_db_path()
         if current and Path(current).resolve() == target.resolve():
             clear_db_path()
-        target.unlink()
+        unlink_with_retry(target)
         log_event(f"event=db_delete name={target.name}")
         _tables_cache.pop(str(target), None)
         _cache_timestamp.pop(str(target), None)
         _cache_mtime.pop(str(target), None)
+        try:
+            cfg.get("priority_tables_by_db", {}).pop(str(target), None)
+            save_config(cfg)
+        except Exception:
+            pass
         # remove converted duckdb with same stem
         duck_out = UPLOAD_DIR / f"{target.stem}.duckdb"
         if duck_out.exists():
             try:
-                duck_out.unlink()
+                unlink_with_retry(duck_out)
             except Exception:
                 pass
             _tables_cache.pop(str(duck_out), None)
             _cache_timestamp.pop(str(duck_out), None)
             _cache_mtime.pop(str(duck_out), None)
+            try:
+                cfg.get("priority_tables_by_db", {}).pop(str(duck_out), None)
+                save_config(cfg)
+            except Exception:
+                pass
         return jsonify({"ok": True, "deleted": str(target.name)})
     except Exception as e:
         return jsonify({"error": f"falha ao apagar: {e}"}), 500
@@ -744,9 +897,9 @@ def admin_set_priority():
         lst = [str(t).strip() for t in tables]
     else:
         return jsonify({"error": "tables param required"}), 400
-    cfg["priority_tables"] = lst
+    set_priority_tables(lst)
     save_config(cfg)
-    return jsonify({"ok": True, "priority_tables": lst})
+    return jsonify({"ok": True, "priority_tables": get_priority_tables()})
 
 
 @app.route("/admin/set_auto_index", methods=["POST"])
@@ -823,8 +976,13 @@ def client_log():
         msg = msg.replace("\n", " ").replace("\r", " ")
     if len(msg) > 500:
         msg = msg[:500]
-    log_event(f"event=client_log level={level} msg={msg}")
+    log_event(f"event=client_log level={level} msg={msg}", level=level)
     return jsonify({"ok": True})
+
+
+@app.route("/admin/logs", methods=["GET"])
+def admin_logs():
+    return jsonify({"ok": True, "logs": list(_RECENT_LOGS)})
 
 
 # ---------------- Search + table endpoints ----------------
@@ -984,13 +1142,13 @@ def api_table():
 
         data = []
         for r in rows:
-            row_obj = {}
-            for i, cname in enumerate(cols):
+            row_list = []
+            for i in range(len(cols)):
                 try:
-                    row_obj[cname] = serialize_value(r[i])
+                    row_list.append(serialize_value(r[i]))
                 except Exception:
-                    row_obj[cname] = None
-            data.append(row_obj)
+                    row_list.append(None)
+            data.append(row_list)
 
         return jsonify(
             {
@@ -1022,6 +1180,7 @@ def api_table():
 def api_search_duckdb(
     q, per_table, candidate_limit, total_limit, token_mode, min_score, tables=None
 ):
+    dbpath = get_db_path()
     q_norm = normalize_text(q)
     tokens = [t for t in q_norm.split() if t]
     if tokens:
@@ -1037,7 +1196,7 @@ def api_search_duckdb(
         where_sql = "content_norm LIKE ?"
         params = [f"%{q_norm}%"]
     # Ao montar os candidatos SQL, já priorizamos as tabelas marcadas em priority_tables
-    priority_tables = cfg.get("priority_tables", []) or []
+    priority_tables = get_priority_tables(dbpath) or []
     if priority_tables:
         in_placeholders = ",".join(["?"] * len(priority_tables))
         sql = (
@@ -1055,7 +1214,7 @@ def api_search_duckdb(
         )
         sql_params = params
     try:
-        conn = duckdb_connect(get_db_path())
+        conn = duckdb_connect(dbpath)
         rows = conn.execute(sql, sql_params).fetchall()
         conn.close()
     except Exception as exc:
@@ -1125,7 +1284,7 @@ def api_search_duckdb(
 
     # Garante que cada tabela prioritária com candidatos apareça pelo menos com 1 linha,
     # mesmo que tenha ficado de fora pelo corte de total_limit acima.
-    priority_tables = cfg.get("priority_tables", []) or []
+    priority_tables = get_priority_tables(dbpath) or []
     if priority_tables:
         for p in priority_tables:
             if allowed_tables and p not in allowed_tables:
@@ -1175,6 +1334,8 @@ def fallback_search_access(
     max_tables=500,
     max_rows_per_table=2000,
 ):
+    if not odbc_allowed():
+        return {"error": "ODBC disabled by config"}
     if pyodbc is None:
         return {"error": "pyodbc not installed; fallback unavailable"}
     q_norm = q.lower()
@@ -1348,7 +1509,7 @@ def fallback_search_access(
             conn.close()
         except Exception:
             pass
-        priority_tables = cfg.get("priority_tables", []) or []
+        priority_tables = get_priority_tables(access_path) or []
         ordered = {}
         for p in priority_tables:
             if p in results:
