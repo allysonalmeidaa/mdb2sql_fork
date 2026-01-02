@@ -1,8 +1,8 @@
-# Repo Map
+# repo map
 
 Resumo tecnico e direto da estrutura, fluxos e responsabilidades do repositorio.
 
-## Estrutura
+## estrutura
 
 - `main.py`: entrypoint para subir a interface Flask completa.
 - `interface/`: backend Flask e utilitarios de indexacao e busca.
@@ -11,7 +11,7 @@ Resumo tecnico e direto da estrutura, fluxos e responsabilidades do repositorio.
 - `tools/`: scripts auxiliares de analise e relatorios.
 - `convert_*.py`: conversores Access -> DuckDB.
 
-## Componentes principais
+## componentes principais
 
 - `interface/app_flask_local_search.py`:
   - Endpoints admin: upload, select, delete, list, status, start_index, set_priority.
@@ -25,7 +25,7 @@ Resumo tecnico e direto da estrutura, fluxos e responsabilidades do repositorio.
 - `static/index.html` + `static/app.js`:
   - Fluxo de UI e chamadas aos endpoints do backend.
 
-## Conversao Access e modularidade (diretriz)
+## conversao access e modularidade (diretriz)
 
 Objetivo: manter conversores isolados e orquestracao centralizada, com modo puro sem ODBC.
 
@@ -37,7 +37,7 @@ Objetivo: manter conversores isolados e orquestracao centralizada, com modo puro
 - `convert_pyodbc.py`:
   - Metodo preferencial no Windows quando ODBC estiver habilitado.
 
-### Feature flags e settings
+### feature flags e settings
 
 - `conversion_mode`:
   - `odbc_preferred`: tenta ODBC primeiro, fallback para metodo puro.
@@ -46,7 +46,7 @@ Objetivo: manter conversores isolados e orquestracao centralizada, com modo puro
   - `true|false` para bloquear qualquer uso de ODBC via configuracao.
   - Afeta conversao, listagem de tabelas Access e fallback de busca.
 
-### Fluxo de decisao (alto nivel)
+### fluxo de decisao (alto nivel)
 
 ```
 if conversion_mode == "pure_only" or odbc_enabled == false:
@@ -56,7 +56,7 @@ else:
     se falhar -> pyaccess_parser
 ```
 
-## Fluxos essenciais
+## fluxos essenciais
 
 - Upload e selecao:
   - UI envia arquivo -> backend grava e atualiza `config.json`.
@@ -68,14 +68,14 @@ else:
   - DuckDB: usa `_fulltext` + ranking.
   - Access: fallback com `pyodbc` e ranking em Python.
 
-## Testes
+## testes
 
 - `tests/` (pytest + unittest): API e funcoes auxiliares.
 - `tests/ui` (Playwright): smoke e fluxos basicos.
 
 ---
 
-## Mapa em blocos (ASCII)
+## mapa em blocos (ascii)
 
 ```
    [UI: static/*]
@@ -90,7 +90,7 @@ else:
    +--> duckdb / _fulltext / pyodbc
 ```
 
-## Mapa em mermaid
+## mapa em mermaid
 
 ```mermaid
 flowchart TD

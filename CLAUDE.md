@@ -1,16 +1,30 @@
-# CLAUDE.md
+# claude.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## shell preferences
+
+**CRITICAL**: This project runs on Windows. You MUST ALWAYS use PowerShell native commands for ALL shell operations:
+- Use PowerShell cmdlets: `Get-ChildItem`, `Test-Path`, `Remove-Item`, etc.
+- Use PowerShell operators: `-eq`, `-ne`, `-and`, `-or`, etc.
+- NEVER use bash/sh syntax (`ls`, `grep`, `cat`, `&&`, `||`, etc.)
+- Execute commands using PowerShell syntax to avoid opening multiple terminal windows
+
+Examples:
+- List files: `Get-ChildItem` (NOT `ls`)
+- Check path: `Test-Path c:\path` (NOT `[ -f /path ]`)
+- Environment: `$env:VARIABLE` (NOT `$VARIABLE`)
+- Chain commands: `command1; command2` (NOT `command1 && command2`)
+
+## project overview
 
 MDB2SQL is a tool for converting Microsoft Access databases (MDB/ACCDB) to DuckDB format with a Flask-based web interface for fuzzy searching and managing converted databases. The system supports both offline DuckDB search (fast, with fulltext index) and online Access ODBC search (slower fallback).
 
-## Core Architecture
+## core architecture
 
-### Conversion Layer (Multiple Implementations)
+### conversion layer (multiple implementations)
 
-The project provides **four independent converter implementations**, each with different dependencies and performance characteristics (see README.md for benchmarks):
+The project provides **four independent converter implementations**, each with different dependencies and performance characteristics (see readme.md for benchmarks):
 
 1. **convert_mdbtools.py** - Uses mdbtools CLI via subprocess (fastest: ~54s/file)
 2. **convert_jackcess.py** - Uses Jackcess Java library (most reliable: ~253s/file, cross-platform)
@@ -25,7 +39,7 @@ The project provides **four independent converter implementations**, each with d
 
 **Key module**: `access_convert.py` - Unified converter wrapper with progress callback support, used exclusively by the web interface. Tries pyodbc first (if available), then falls back to other methods. Progress callbacks emit: `total_tables`, `processed_tables`, `current_table`, `percent`, `msg`.
 
-### Web Interface Layer
+### web interface layer
 
 **Main entry point**: `main.py` - Launches Flask dev server (default port 5001) with:
 - Port availability checking before startup
@@ -53,7 +67,7 @@ The project provides **four independent converter implementations**, each with d
 
 **DB path resolution order**: ENV var `DB_PATH` > runtime `_runtime_db_path` > config file `db_path` (if remember_last_db=true)
 
-### Search System
+### search system
 
 **Fulltext indexing**: `interface/create_fulltext.py` creates `_fulltext` table with:
 - **Schema**: `table_name`, `pk_col`, `pk_value`, `row_offset`, `content_norm`, `row_json`
@@ -79,7 +93,7 @@ The project provides **four independent converter implementations**, each with d
 - `normalize_text(s)`: NFD normalization, accent removal, lowercase, punctuation/underscore to space
 - `serialize_value(v)`: Converts DuckDB types (datetime, decimal, bytes) to JSON-compatible values
 
-### File Organization
+### file organization
 
 ```
 /
@@ -102,64 +116,64 @@ The project provides **four independent converter implementations**, each with d
     └── test_web_interface.py      # Web interface tests
 ```
 
-## Development Commands
+## development commands
 
-### Setup
+### setup
 
 ```bash
-# Install dependencies
+# install dependencies
 pip install -r requirements.txt
 
-# Install system dependencies (choose one based on your needs)
+# install system dependencies (choose one based on your needs)
 brew install mdbtools      # For convert_mdbtools.py (Mac)
 brew install openjdk       # For convert_jackcess.py (Mac)
 sudo apt install mdbtools  # For convert_mdbtools.py (Linux)
 ```
 
-### Running the Application
+### running the application
 
 ```bash
-# Start Flask interface (default port 5001)
+# start flask interface (default port 5001)
 python main.py
 
-# Custom configuration
+# custom configuration
 python main.py --port 5002 --debug --upload-folder /path/to/uploads
 ```
 
-### Running Tests
+### running tests
 
 ```bash
-# Run integration tests (requires server running on port 5001)
+# run integration tests (requires server running on port 5001)
 python tests/test_geral.py
 python tests/test_web_interface.py
 
-# Run with pytest
+# run with pytest
 python -m pytest tests/
 ```
 
-### Running Converters Directly
+### running converters directly
 
 ```bash
-# Single file conversion
+# single file conversion
 python convert_mdbtools.py --input file.mdb --output database.duckdb
 
-# Batch processing
+# batch processing
 python convert_mdbtools.py --input import_folder --output database.duckdb --batch
 ```
 
-### Creating Fulltext Index
+### creating fulltext index
 
 ```bash
-# Create/resume index
+# create/resume index
 python interface/create_fulltext.py database.duckdb
 
-# Rebuild from scratch
+# rebuild from scratch
 python interface/create_fulltext.py database.duckdb --drop
 ```
 
-## Key Implementation Details
+## key implementation details
 
-### Threading and Concurrency
+### threading and concurrency
 
 **Two independent background threads**:
 - `convert_thread`: Handles `.mdb`/`.accdb` → `.duckdb` conversion
@@ -172,7 +186,7 @@ python interface/create_fulltext.py database.duckdb --drop
 
 **Thread lifecycle**: Both threads are daemon threads, so they terminate when Flask shuts down.
 
-### Caching Strategy
+### caching strategy
 
 **Table list caching**:
 - Cache: `_tables_cache` dict keyed by database path
@@ -182,7 +196,7 @@ python interface/create_fulltext.py database.duckdb --drop
 
 **Why caching matters**: Listing tables can take 100ms+ on large DuckDB files. With 60s cache, the `/api/tables` endpoint becomes near-instant for repeated calls.
 
-### Security Measures
+### security measures
 
 - **Filename sanitization**: `secure_filename()` from werkzeug (removes path traversal)
 - **Table name validation**: Regex `^[A-Za-z0-9_]+$` before SQL (prevents injection)
@@ -190,7 +204,7 @@ python interface/create_fulltext.py database.duckdb --drop
 - **Path validation**: Upload paths validated with `resolve().relative_to()` to prevent directory traversal
 - **Response compression**: Gzip applied to JSON responses >1000 bytes (reduces bandwidth)
 
-### Search Behavior
+### search behavior
 
 **Token modes**:
 - `token_mode="any"`: OR logic across tokens (default) - matches rows with ANY search term
@@ -205,7 +219,7 @@ python interface/create_fulltext.py database.duckdb --drop
 2. `per_table`: Max rows per table in results (default 10)
 3. `total_limit`: Absolute max rows across all tables (default 500)
 
-### File Naming Convention for Date Extraction
+### file naming convention for date extraction
 
 Converters extract dates from filenames using regex patterns:
 - `DD_MM_YYYY` or `DD-MM-YYYY` → parsed as day-month-year
@@ -215,7 +229,7 @@ Converters extract dates from filenames using regex patterns:
 
 If no date found, falls back to current date with a warning. Extracted date becomes the table suffix.
 
-## API Endpoints
+## api endpoints
 
 Key endpoints:
 - `GET /api/health` - Health check with cache metrics
@@ -228,7 +242,7 @@ Key endpoints:
 - `POST /admin/start_index` - Trigger fulltext indexing
 - `GET /admin/status` - Get conversion/indexing status
 
-## Configuration Details
+## configuration details
 
 **Environment variables** (set by `main.py` or externally):
 - `DB_PATH` - Overrides config file and runtime DB selection (highest priority)
@@ -256,7 +270,7 @@ Key endpoints:
 - Missing `remember_last_db` → defaults to false
 - If `remember_last_db=false` → `db_path` cleared
 
-## Important Gotchas
+## important gotchas
 
 1. **Test server port**: Integration tests expect server on port 5001 (not 5000). Use `python main.py` without args.
 
@@ -274,7 +288,7 @@ Key endpoints:
 
 8. **Large file uploads**: Default 500MB limit. Adjust `--max-content-length` or `MAX_CONTENT_LENGTH` env var for larger files.
 
-## Benchmarking
+## benchmarking
 
 `benchmark.py` provides comparative performance testing:
 - Runs all four converter implementations on sample files

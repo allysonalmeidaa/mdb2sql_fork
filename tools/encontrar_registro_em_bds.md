@@ -1,4 +1,4 @@
-# Uso do utilitário encontrar_registro_em_bds.py (documentação de apoio) — versão genérica
+# uso do utilitário encontrar_registro_em_bds.py (documentação de apoio) — versão genérica
 
 Resumo rápido
 - Objetivo: localizar a presença/ausência de registros em um diretório com vários arquivos de banco (DuckDB / SQLite / Access .mdb/.accdb).
@@ -27,55 +27,55 @@ Uso — exemplos praticos
 
 PowerShell:
 ```
-# Buscar RTUNO+PNTNO
+# buscar rtuno+pntno
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --filters "RTUNO=1,PNTNO=2304" --table RANGER_SOSTAT --out-csv resultados.csv
 
-# Buscar RTUNO+PNTNO sem informar a tabela (o script tentara em todas as tabelas de cada arquivo)
+# buscar rtuno+pntno sem informar a tabela (o script tentara em todas as tabelas de cada arquivo)
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --filters "RTUNO=1,PNTNO=2304" --out-csv resultados_todas.csv
 
-# Filtro com string contendo virgula
+# filtro com string contendo virgula
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --filters 'SUBNAM="U,05",RTUNO=1' --out-csv resultados.csv
 
-# Buscar por valor em colunas comuns (sem saber coluna)
+# buscar por valor em colunas comuns (sem saber coluna)
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --key "U05" --sample --out-csv resultados_key.csv
 
-# Buscar em coluna especifica
+# buscar em coluna especifica
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --key "U05" --col SUBNAM --table RANGER_SOANALOG --sample
 ```
 
 Bash:
 ```
-# Buscar RTUNO+PNTNO
+# buscar rtuno+pntno
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --filters "RTUNO=1,PNTNO=2304" --table RANGER_SOSTAT --out-csv resultados.csv
 
-# Buscar RTUNO+PNTNO sem informar a tabela (o script tentara em todas as tabelas de cada arquivo)
+# buscar rtuno+pntno sem informar a tabela (o script tentara em todas as tabelas de cada arquivo)
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --filters "RTUNO=1,PNTNO=2304" --out-csv resultados_todas.csv
 
-# Filtro com string contendo virgula
+# filtro com string contendo virgula
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --filters 'SUBNAM="U,05",RTUNO=1' --out-csv resultados.csv
 
-# Buscar por valor em colunas comuns (sem saber coluna)
+# buscar por valor em colunas comuns (sem saber coluna)
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --key "U05" --sample --out-csv resultados_key.csv
 
-# Buscar em coluna especifica
+# buscar em coluna especifica
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --key "U05" --col SUBNAM --table RANGER_SOANALOG --sample
 ```
 
 Zsh:
 ```
-# Buscar RTUNO+PNTNO
+# buscar rtuno+pntno
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --filters "RTUNO=1,PNTNO=2304" --table RANGER_SOSTAT --out-csv resultados.csv
 
-# Buscar RTUNO+PNTNO sem informar a tabela (o script tentara em todas as tabelas de cada arquivo)
+# buscar rtuno+pntno sem informar a tabela (o script tentara em todas as tabelas de cada arquivo)
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --filters "RTUNO=1,PNTNO=2304" --out-csv resultados_todas.csv
 
-# Filtro com string contendo virgula
+# filtro com string contendo virgula
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --filters 'SUBNAM="U,05",RTUNO=1' --out-csv resultados.csv
 
-# Buscar por valor em colunas comuns (sem saber coluna)
+# buscar por valor em colunas comuns (sem saber coluna)
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --key "U05" --sample --out-csv resultados_key.csv
 
-# Buscar em coluna especifica
+# buscar em coluna especifica
 python tools/encontrar_registro_em_bds.py -d "./mdbs" --key "U05" --col SUBNAM --table RANGER_SOANALOG --sample
 ```
 

@@ -1,18 +1,18 @@
-# Tools — Guia de Uso e Relações
+# tools — guia de uso e relações
 
 Este diretório contém utilitários para:
 - analisar uma tabela por coluna (por arquivo e em lote);
 - consolidar relatórios interativos (por arquivo e global, agregando múltiplos bancos);
 - localizar a presença de um registro ao longo de vários bancos.
 
-## Visão Geral do Fluxo
+## visão geral do fluxo
 1. **Análise por arquivo/tabela**: `analyze_single_table_by_column.py` gera CSVs e gráficos por coluna.
 2. **Lote (vários bancos)**: `batch_analyze_all_dbs.py` executa o script acima para muitos arquivos.
 3. **Relatório interativo (por arquivo)**: `build_consolidated_interactive_report_pt.py` compila a última análise em um HTML navegável.
 4. **Relatório global (vários bancos)**: `build_global_report_from_analyses.py` agrega todas as análises (CSV, HTML interativo e um SQLite global).
 5. **Busca de registro**: `encontrar_registro_em_bds.py` verifica em quais bancos um registro aparece/desaparece.
 
-## Scripts
+## scripts
 
 ### `analyze_single_table_by_column.py`
 - **O que faz**: para uma tabela de um arquivo de banco, calcula por coluna: nulos, distintos, top valores (CSV) e gráfico de barras (PNG).
@@ -98,39 +98,39 @@ python tools/build_global_report_from_analyses.py --analises "./import_folder/an
 - **Exemplos**:
 PowerShell:
 ```
-# Filtros compostos em tabela especifica
+# filtros compostos em tabela especifica
 python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters "RTUNO=1,PNTNO=2304" --table "RANGER_SOSTAT" --out-csv "./saida/resultados.csv" --verbose
 
-# Filtros compostos tentando todas as tabelas
+# filtros compostos tentando todas as tabelas
 python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters 'SUBNAM="U,05",RTUNO=1' --out-csv "./saida/resultados_todas.csv" --brief
 
-# Modo generico por valor
+# modo generico por valor
 python tools/encontrar_registro_em_bds.py --dir "./mdbs" --key "U05" --sample --out-csv "./saida/resultados_key.csv"
 ```
 Bash:
 ```
-# Filtros compostos em tabela especifica
+# filtros compostos em tabela especifica
 python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters "RTUNO=1,PNTNO=2304" --table "RANGER_SOSTAT" --out-csv "./saida/resultados.csv" --verbose
 
-# Filtros compostos tentando todas as tabelas
+# filtros compostos tentando todas as tabelas
 python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters 'SUBNAM="U,05",RTUNO=1' --out-csv "./saida/resultados_todas.csv" --brief
 
-# Modo generico por valor
+# modo generico por valor
 python tools/encontrar_registro_em_bds.py --dir "./mdbs" --key "U05" --sample --out-csv "./saida/resultados_key.csv"
 ```
 Zsh:
 ```
-# Filtros compostos em tabela especifica
+# filtros compostos em tabela especifica
 python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters "RTUNO=1,PNTNO=2304" --table "RANGER_SOSTAT" --out-csv "./saida/resultados.csv" --verbose
 
-# Filtros compostos tentando todas as tabelas
+# filtros compostos tentando todas as tabelas
 python tools/encontrar_registro_em_bds.py --dir "./mdbs" --filters 'SUBNAM="U,05",RTUNO=1' --out-csv "./saida/resultados_todas.csv" --brief
 
-# Modo generico por valor
+# modo generico por valor
 python tools/encontrar_registro_em_bds.py --dir "./mdbs" --key "U05" --sample --out-csv "./saida/resultados_key.csv"
 ```
 
-## Dependências
+## dependências
 - `pandas` (todos os relatórios CSV/HTML),
 - `matplotlib` (gráficos por coluna no analyze),
 - `plotly` (HTML interativo por arquivo e global),
@@ -140,13 +140,13 @@ python tools/encontrar_registro_em_bds.py --dir "./mdbs" --key "U05" --sample --
 
 Em Windows, para `.accdb`: instale Microsoft Access Database Engine (ACE) compatível com sua arquitetura (32/64 bits do Python).
 
-## Boas Práticas
+## boas práticas
 - Rode o `batch_analyze_all_dbs.py` antes dos relatórios para ter pastas atualizadas por banco.
 - Use `--top` e `--distinct-cap` no analyze para ajustar performance em colunas com alta cardinalidade.
 - No relatório global, verifique observações que sinalizam inconsistência (ex.: Distinto(média) > Distinto(global)).
 - Sempre versionar os artefatos (`summary_by_column.csv`, `columns/*.csv`, HTMLs) com timestamp/pasta por banco.
 
-## Dicas Rápidas
+## dicas rápidas
 - Para testar rapido um unico banco:
 PowerShell:
 ```

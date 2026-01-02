@@ -101,6 +101,9 @@ let priorityTables = []; // lista atual de tabelas prioritarias
 let lastUploads = [];
 let accessStems = new Set();
 let lastConversionRunning = false;
+let lastIndexingRunning = false;
+let conversionCompletionTimer = null;
+let indexCompletionTimer = null;
 let activeModalId = null;
 let statusPollTimer = null;
 let lastTablesByDb = {};
@@ -210,6 +213,61 @@ window.addEventListener('unhandledrejection', (e)=>{
     el.style.display = 'block';
     el.classList.remove('info','warn','error');
     if(level) el.classList.add(level);
+  }
+
+  function setModalBanner(elId, text, level){
+    const el = $(elId);
+    if(!el) return;
+    if(!text){
+      el.textContent = '';
+      el.style.display = 'none';
+      el.classList.remove('info','warn','error');
+      return;
+    }
+    el.textContent = text;
+    el.style.display = 'block';
+    el.classList.remove('info','warn','error');
+    if(level) el.classList.add(level);
+  }
+
+  function scheduleModalClose(nextModalId){
+    if(conversionCompletionTimer){
+      clearTimeout(conversionCompletionTimer);
+      conversionCompletionTimer = null;
+    }
+    conversionCompletionTimer = setTimeout(()=>{
+      closeModal();
+      if(nextModalId){
+        openModalById(nextModalId);
+        if(nextModalId === 'searchModal'){
+          const q = $('q');
+          if(q && !q.disabled){
+            q.focus();
+            q.select();
+          }
+        }
+      }
+    }, 1600);
+  }
+
+  function scheduleIndexModalClose(nextModalId){
+    if(indexCompletionTimer){
+      clearTimeout(indexCompletionTimer);
+      indexCompletionTimer = null;
+    }
+    indexCompletionTimer = setTimeout(()=>{
+      closeModal();
+      if(nextModalId){
+        openModalById(nextModalId);
+        if(nextModalId === 'searchModal'){
+          const q = $('q');
+          if(q && !q.disabled){
+            q.focus();
+            q.select();
+          }
+        }
+      }
+    }, 1600);
   }
 
   function setSearchControlsEnabled(enabled){
@@ -518,6 +576,8 @@ function forceModalStyles(modal, overlay){
       overlay.style.inset = '0';
       overlay.style.background = 'rgba(0,0,0,0.35)';
       overlay.style.zIndex = '5000';
+      overlay.style.pointerEvents = 'auto';
+      overlay.style.visibility = 'visible';
     }
     if(modal){
       const card = getComputedStyle(document.documentElement).getPropertyValue('--card').trim() || '#fff';
@@ -541,7 +601,7 @@ function forceModalStyles(modal, overlay){
   }
 
   function closeAllModals(){
-    ['configModal','priorityModal','indexModal','statusModal'].forEach(id => resetModalStyles($(id)));
+    ['configModal','priorityModal','indexModal','statusModal','searchModal'].forEach(id => resetModalStyles($(id)));
     activeModalId = null;
   }
 
@@ -553,12 +613,16 @@ function forceModalStyles(modal, overlay){
     activeModalId = modalId;
     document.body.classList.add('modal-open');
     forceModalStyles(modal, overlay);
+    if(overlay){
+      overlay.onclick = ()=> closeModal();
+    }
     const display = modal ? getComputedStyle(modal).display : 'none';
     logUi('INFO', 'modal open id=' + modalId + ' display=' + display);
     try{
       fetch('/client/log',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:'info',msg:'modal open id=' + modalId + ' display=' + display})});
     }catch(e){ /* ignored */ }
     setTimeout(()=>{
+      if(activeModalId !== modalId) return;
       const m = $(modalId);
       if(!m){ logUi('ERROR', 'modal missing'); return; }
       const d = getComputedStyle(m).display;
@@ -609,6 +673,8 @@ function forceModalStyles(modal, overlay){
       overlay.style.position = '';
       overlay.style.inset = '';
       overlay.style.background = '';
+      overlay.style.pointerEvents = '';
+      overlay.style.visibility = '';
     }
     if(modalId === 'configModal'){
       manualFlowOverride = '';
@@ -617,6 +683,23 @@ function forceModalStyles(modal, overlay){
     try{
       fetch('/client/log',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:'info',msg:'modal close'})});
     }catch(e){ /* ignored */ }
+    activeModalId = null;
+  }
+
+  function forceCloseModals(){
+    const overlay = $('overlay');
+    document.body.classList.remove('modal-open');
+    closeAllModals();
+    if(overlay){
+      overlay.style.display = 'none';
+      overlay.style.zIndex = '';
+      overlay.style.position = '';
+      overlay.style.inset = '';
+      overlay.style.background = '';
+      overlay.style.pointerEvents = '';
+      overlay.style.visibility = '';
+    }
+    manualFlowOverride = '';
     activeModalId = null;
   }
 
@@ -801,14 +884,14 @@ function renderFilesMain(){
   el.innerHTML = list.map(f => {
     const name = f && f.name ? f.name : '';
     const isSelected = currentName && currentName === String(name).toLowerCase();
-    const metaText = getFileMetaText(f);
-    const statusText = getFileStatusText(f);
-    const typeLabel = getFlowFromName(name) || 'outro';
+    const metaText = escapeHtml(getFileMetaText(f));
+    const statusText = escapeHtml(getFileStatusText(f));
+    const typeLabel = escapeHtml(getFlowFromName(name) || 'outro');
     const badge = '<span class="file-badge">' + typeLabel + '</span>';
     const selectedBadge = isSelected ? '<span class="selected-badge">Selecionado</span>' : '';
     return `<div class="file-row${isSelected ? ' selected' : ''}">
       <div>
-        <div class="file-name"><span class="file-name-text">${name}</span> ${badge} ${selectedBadge}</div>
+        <div class="file-name"><span class="file-name-text">${escapeHtml(name)}</span> ${badge} ${selectedBadge}</div>
         <div class="file-meta">${metaText}</div>
         <div class="file-status">${statusText}</div>
       </div>
@@ -832,15 +915,15 @@ function renderFilesSelect(){
   el.innerHTML = list.map(f => {
     const name = f && f.name ? f.name : '';
     const isSelected = currentName && currentName === String(name).toLowerCase();
-    const metaText = getFileMetaText(f);
-    const statusText = getFileStatusText(f);
+    const metaText = escapeHtml(getFileMetaText(f));
+    const statusText = escapeHtml(getFileStatusText(f));
     const selectLabel = isSelected ? 'Selecionado' : 'Selecionar';
     const selectClass = isSelected ? 'btn select-btn selected' : 'btn ghost select-btn';
     const selectAction = isSelected ? 'disabled' : `onclick="selectUpload('${encodeURIComponent(name)}', this)"`;
-    const rowClick = isSelected ? '' : `onclick="onSelectRowClick(event,'${encodeURIComponent(name)}')"`;
+    const rowClick = isSelected ? '' : `onclick="onSelectRowClick(event,'${encodeURIComponent(name)}')"`; 
     return `<div class="upload-row${isSelected ? ' selected' : ''}" ${rowClick}>
       <div>
-        <div style="font-weight:600">${name} ${isSelected ? '<span class="selected-badge">Selecionado</span>' : ''}</div>
+        <div style="font-weight:600">${escapeHtml(name)} ${isSelected ? '<span class="selected-badge">Selecionado</span>' : ''}</div>
         <div class="file-meta">${metaText}</div>
         <div class="file-status">${statusText}</div>
       </div>
@@ -938,7 +1021,7 @@ function renderDbTabs(){
     const name = f.name;
     const isActive = currentName && currentName === String(name).toLowerCase();
     const cls = isActive ? 'db-tab active' : 'db-tab';
-    return `<button class="${cls}" onclick="selectDbFromTab('${encodeURIComponent(name)}')" title="${name}">${name}</button>`;
+    return `<button class="${cls}" onclick="selectDbFromTab('${encodeURIComponent(name)}')" title="${escapeAttr(name)}">${escapeHtml(name)}</button>`;
   }).join('');
   if(help){
     help.textContent = 'Abas por banco: clique para trocar as tabelas exibidas.';
@@ -958,6 +1041,8 @@ async function refreshStatus(){
     const uiFlow = conversionRunning ? 'access' : (converted ? 'access' : (dbType || currentFlow));
     const indexFlow = conversionRunning ? '' : dbType;
     const modalOpen = activeModalId === 'configModal';
+    const conversionJustFinished = lastConversionRunning && !conversionRunning;
+    const indexingJustFinished = lastIndexingRunning && !s.indexing;
     if(!modalOpen && manualFlowOverride){
       manualFlowOverride = '';
     }
@@ -1113,12 +1198,21 @@ async function refreshStatus(){
         indexMsg.textContent = conversionRunning ? 'Aguarde conversao.' : 'Indice _fulltext disponivel apenas para DuckDB.';
       }
     }
+    if(s.indexing){
+      const idxPct = s.indexing_percent || s.index_progress || s.index_percent;
+      const pctText = (typeof idxPct === 'number') ? (' Progresso: ' + idxPct + '%') : '';
+      setModalBanner('indexModalBanner', 'Indexacao em andamento.' + pctText, 'info');
+    }
     if(s.conversion && s.conversion.running){
       const percent = s.conversion.percent || 0;
       $('convBar').style.width = percent + '%';
       $('convPercentText').textContent = (percent||0) + '%';
       $('convStatusText').textContent = `Convertendo: ${s.conversion.current_table || ''} (${s.conversion.processed_tables || 0}/${s.conversion.total_tables || 0})`;
       $('modeBadge').textContent = 'Modo: convertendo...';
+      const topHint = $('convTopHint');
+      if(topHint){
+        topHint.textContent = s.auto_index_after_convert ? 'Auto indexacao apos conversao: ativa.' : 'Auto indexacao apos conversao: desativada.';
+      }
     } else {
       if(converted) $('modeBadge').textContent = 'Modo: access convertido';
       else if(dbType === 'duckdb') $('modeBadge').textContent = 'Modo: duckdb (rapido)';
@@ -1147,6 +1241,10 @@ async function refreshStatus(){
         $('convBar').style.width = (s.conversion && s.conversion.percent) ? s.conversion.percent + '%' : '0%';
         $('convPercentText').textContent = (s.conversion && s.conversion.percent) ? s.conversion.percent + '%' : '0%';
       }
+      const topHint = $('convTopHint');
+      if(topHint){
+        topHint.textContent = '';
+      }
     }
 
     const upEl = $('uploadMsg');
@@ -1159,11 +1257,42 @@ async function refreshStatus(){
           upEl.textContent = 'Conversao falhou: ' + (s.conversion.msg || 'erro');
         }
       }
-      lastConversionRunning = !!s.conversion.running;
     }
-    let html = `<div>DB: ${s.db || '(nenhum)'}<br/>_fulltext linhas: ${s.fulltext_count || 0}</div>`;
+
+    if(conversionJustFinished){
+      const ok = s.conversion && s.conversion.ok;
+      const message = ok
+        ? 'Conversao concluida. Encaminhando para o proximo passo.'
+        : 'Conversao falhou. Veja detalhes em Alertas e logs.';
+      setModalBanner('convModalBanner', message, ok ? 'info' : 'error');
+      if(activeModalId === 'configModal'){
+        const nextModal = ok && (s.indexing || (s.fulltext_count === 0)) ? 'indexModal' : '';
+        scheduleModalClose(nextModal || '');
+      }
+    } else if(!conversionRunning){
+      setModalBanner('convModalBanner', '', '');
+    }
+
+    if(indexingJustFinished){
+      const okIndex = !!s.fulltext_count;
+      const msg = okIndex ? 'Indexacao concluida. Busca liberada.' : 'Indexacao terminou sem _fulltext.';
+      setModalBanner('indexModalBanner', msg, okIndex ? 'info' : 'warn');
+      if(activeModalId === 'indexModal'){
+        const next = okIndex ? 'searchModal' : '';
+        scheduleIndexModalClose(next || '');
+      }
+    } else if(!s.indexing){
+      setModalBanner('indexModalBanner', '', '');
+    }
+
+    lastConversionRunning = !!(s.conversion && s.conversion.running);
+    lastIndexingRunning = !!s.indexing;
+    const dbLabel = escapeHtml(s.db || '(nenhum)');
+    let html = `<div>DB: ${dbLabel}<br/>_fulltext linhas: ${s.fulltext_count || 0}</div>`;
     if(s.top_tables && s.top_tables.length){
-      html += '<div style="margin-top:8px"><strong>Top tabelas:</strong><ul>' + s.top_tables.map(t=>`<li>${t.table} - ${t.count}</li>`).join('') + '</ul></div>';
+      html += '<div style="margin-top:8px"><strong>Top tabelas:</strong><ul>' +
+        s.top_tables.map(t => `<li>${escapeHtml(t.table)} - ${t.count}</li>`).join('') +
+        '</ul></div>';
     }
     const adminStatus = $('adminStatus');
     if(adminStatus) adminStatus.innerHTML = html;
@@ -1179,10 +1308,12 @@ async function refreshStatus(){
 }
 
 async function refreshTables(){
-  if(!hasDbSelected()){
-    $('tableList').innerHTML = '<div class="muted">Nenhum DB selecionado</div>';
-    return;
-  }
+    const tableList = $('tableList');
+    if(!tableList) return;
+    if(!hasDbSelected()){
+      tableList.innerHTML = '<div class="muted">Nenhum DB selecionado</div>';
+      return;
+    }
   try{
     const t = await apiJSON('/api/tables');
       if(t.error){
@@ -1191,7 +1322,8 @@ async function refreshTables(){
         return;
       }
     const list = t.tables || [];
-    const filter = $('filterTables').value.toLowerCase();
+    const filterEl = $('filterTables');
+    const filter = filterEl ? filterEl.value.toLowerCase() : '';
     const dbKey = String(currentDb || '');
     const prev = lastTablesByDb[dbKey] || [];
     const prevSet = new Set(prev);
@@ -1205,7 +1337,7 @@ async function refreshTables(){
         const isNew = currentSet.has(name) && !prevSet.has(name);
         const badge = isNew ? ' <span class="file-badge">novo</span>' : '';
         const li = document.createElement('li'); li.className='table-item';
-        li.innerHTML = `<div>${name}${badge}</div><div><button class="btn ghost" onclick="openTable(event,'${encodeURIComponent(name)}')">Abrir</button></div>`;
+        li.innerHTML = `<div>${escapeHtml(name)}${badge}</div><div><button class="btn ghost" onclick="openTable(event,'${encodeURIComponent(name)}')">Abrir</button></div>`;
         li.onclick = () => openTable(null, encodeURIComponent(name));
         container.appendChild(li);
       });
@@ -1257,22 +1389,85 @@ if(openIndexInline){
     refreshStatus();
   });
 }
-const openStatusBtn = $('openStatus');
-if(openStatusBtn){
-  openStatusBtn.addEventListener('click', async ()=>{
-    openModalById('statusModal');
+const openSelectInline = $('openSelectInline');
+if(openSelectInline){
+  openSelectInline.addEventListener('click', (ev)=>{
+    ev.preventDefault();
+    openModalById('configModal');
+    refreshUiState({sync:true});
+  });
+}
+async function openStatusModal(){
+  openModalById('statusModal');
+  try{
     await refreshStatus();
     await fetchServerLogs();
     renderStatusModal();
+    logUi('INFO', 'detalhes abertos');
+  }catch(e){
+    renderStatusModal();
+    logUi('ERROR', 'detalhes falhou');
+  }
+}
+window.openStatusModal = openStatusModal;
+const openConvertInline = $('openConvertInline');
+if(openConvertInline){
+  openConvertInline.addEventListener('click', async (ev)=>{
+    ev.preventDefault();
+    await openStatusModal();
+  });
+}
+const stepConvert = $('stepConvert');
+if(stepConvert){
+  stepConvert.addEventListener('click', async (ev)=>{
+    if(ev && ev.target && ev.target.tagName === 'BUTTON') return;
+    await openStatusModal();
+  });
+}
+const openSearchInline = $('openSearchInline');
+if(openSearchInline){
+  openSearchInline.addEventListener('click', (ev)=>{
+    ev.preventDefault();
+    openModalById('searchModal');
+    refreshStatus();
+    const q = $('q');
+    if(q && !q.disabled){
+      q.focus();
+      q.select();
+    }
+  });
+}
+const stepIndex = $('stepIndex');
+if(stepIndex){
+  stepIndex.addEventListener('click', (ev)=>{
+    if(ev && ev.target && ev.target.tagName === 'BUTTON') return;
+    openModalById('indexModal');
+    refreshStatus();
+  });
+}
+const stepSearch = $('stepSearch');
+if(stepSearch){
+  stepSearch.addEventListener('click', (ev)=>{
+    if(ev && ev.target && ev.target.tagName === 'BUTTON') return;
+    openModalById('searchModal');
+    refreshStatus();
+    const q = $('q');
+    if(q && !q.disabled){
+      q.focus();
+      q.select();
+    }
+  });
+}
+const openStatusBtn = $('openStatus');
+if(openStatusBtn){
+  openStatusBtn.addEventListener('click', async ()=>{
+    await openStatusModal();
   });
 }
 const statusAlerts = $('statusAlerts');
 if(statusAlerts){
   statusAlerts.addEventListener('click', async ()=>{
-    openModalById('statusModal');
-    await refreshStatus();
-    await fetchServerLogs();
-    renderStatusModal();
+    await openStatusModal();
   });
 }
 $('closeStatus').addEventListener('click', ()=> closeModal());
@@ -1281,8 +1476,23 @@ const closePriorityBtn = $('closePriority');
 if(closePriorityBtn) closePriorityBtn.addEventListener('click', ()=> closeModal());
 const closeIndexBtn = $('closeIndex');
 if(closeIndexBtn) closeIndexBtn.addEventListener('click', ()=> closeModal());
-$('overlay').addEventListener('click', ()=> closeModal());
-['openConfig','openPriority','openIndex','closeConfig','closePriority','closeIndex','overlay'].forEach(id => {
+const closeSearchBtn = $('closeSearch');
+if(closeSearchBtn) closeSearchBtn.addEventListener('click', ()=> closeModal());
+const overlayEl = $('overlay');
+if(overlayEl){
+  const closeHandler = (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    forceCloseModals();
+  };
+  overlayEl.addEventListener('mousedown', closeHandler, true);
+  overlayEl.addEventListener('click', closeHandler, true);
+  overlayEl.onclick = closeHandler;
+  overlayEl.addEventListener('mouseup', closeHandler, true);
+  overlayEl.addEventListener('pointerdown', closeHandler, true);
+  overlayEl.addEventListener('pointerup', closeHandler, true);
+}
+['openConfig','openPriority','openIndex','closeConfig','closePriority','closeIndex','closeSearch','overlay'].forEach(id => {
   const el = $(id);
   if(el) el.addEventListener('click', ()=> scheduleStatusPoll());
 });
@@ -1445,7 +1655,7 @@ async function loadPriorityModal(){
     const remaining = visible.filter(x => !saved.includes(x));
     remaining.forEach(name => {
       const li = document.createElement('li'); li.dataset.table=name;
-      li.innerHTML = `<label style="display:flex;align-items:center;gap:8px;width:100%"><input type="checkbox" data-name="${escapeHtml(name)}" onchange="onTableCheckboxChange(this)"> <span style="flex:1">${escapeHtml(name)}</span></label>`;
+      li.innerHTML = `<label style="display:flex;align-items:center;gap:8px;width:100%"><input type="checkbox" data-name="${encodeURIComponent(name)}" onchange="onTableCheckboxChange(this)"> <span style="flex:1">${escapeHtml(name)}</span></label>`;
       allEl.appendChild(li);
     });
     saved.forEach(name => {
@@ -1461,7 +1671,7 @@ async function loadPriorityModal(){
     logUi('ERROR', 'priority modal falhou');
   }
 }
-function onTableCheckboxChange(chk){ const name = chk.getAttribute('data-name'); if(chk.checked){ const selEl = $('priorityListModal'); const li = document.createElement('li'); li.draggable=true; li.dataset.table=name; li.innerHTML = `<div style="flex:1">${escapeHtml(name)}</div><div style="display:flex;gap:6px"><button class="btn ghost" onclick="prioMoveUp(this)" title="Mover para cima">Up</button><button class="btn ghost" onclick="prioMoveDown(this)" title="Mover para baixo">Down</button><button class="btn ghost" onclick="prioRemove(this)" title="Remover">X</button></div>`; selEl.appendChild(li); enableDragAndDrop(selEl); } else { const selEl = $('priorityListModal'); const it = Array.from(selEl.children).find(li => li.dataset.table === name); if(it) selEl.removeChild(it); } }
+function onTableCheckboxChange(chk){ const raw = chk.getAttribute('data-name') || ''; const name = decodeURIComponent(raw); if(chk.checked){ const selEl = $('priorityListModal'); const li = document.createElement('li'); li.draggable=true; li.dataset.table=name; li.innerHTML = `<div style="flex:1">${escapeHtml(name)}</div><div style="display:flex;gap:6px"><button class="btn ghost" onclick="prioMoveUp(this)" title="Mover para cima">Up</button><button class="btn ghost" onclick="prioMoveDown(this)" title="Mover para baixo">Down</button><button class="btn ghost" onclick="prioRemove(this)" title="Remover">X</button></div>`; selEl.appendChild(li); enableDragAndDrop(selEl); } else { const selEl = $('priorityListModal'); const it = Array.from(selEl.children).find(li => li.dataset.table === name); if(it) selEl.removeChild(it); } }
 function enableDragAndDrop(listEl){ let dragSrc=null; Array.from(listEl.children).forEach(li=>{ li.addEventListener('dragstart',(e)=>{ dragSrc=li; li.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; }); li.addEventListener('dragend',()=>{ li.classList.remove('dragging'); }); li.addEventListener('dragover',(e)=>{ e.preventDefault(); const target=e.currentTarget; if(target===dragSrc) return; const rect=target.getBoundingClientRect(); const next=(e.clientY-rect.top)>rect.height/2; if(next){ target.parentNode.insertBefore(dragSrc,target.nextSibling); } else { target.parentNode.insertBefore(dragSrc,target); } }); li.addEventListener('drop',(e)=>{ e.preventDefault(); }); }); }
 function prioMoveUp(btn){ const li=btn.closest('li'); const prev=li.previousElementSibling; if(prev) li.parentNode.insertBefore(li,prev); }
 function prioMoveDown(btn){ const li=btn.closest('li'); const next=li.nextElementSibling; if(next) li.parentNode.insertBefore(li,next.nextElementSibling); }
@@ -1700,7 +1910,8 @@ function renderResults(q, results, per_table){
   keys.forEach(tbl => {
     const block = document.createElement('div'); block.className='card';
     const header = document.createElement('div'); header.style.display='flex'; header.style.justifyContent='space-between';
-      header.innerHTML = `<div><span id="tag-${tbl}" style="display:none;background:#eef7ff;color:var(--primary);padding:4px 8px;border-radius:999px;margin-right:8px;font-size:12px">PRIORITARIO</span><strong>${tbl}</strong> <span class="muted">(${results[tbl].length})</span></div>
+      const tagId = tableTagId(tbl);
+      header.innerHTML = `<div><span id="${tagId}" style="display:none;background:#eef7ff;color:var(--primary);padding:4px 8px;border-radius:999px;margin-right:8px;font-size:12px">PRIORITARIO</span><strong>${escapeHtml(tbl)}</strong> <span class="muted">(${results[tbl].length})</span></div>
       <div><button class="btn ghost" onclick="openTable(event,'${encodeURIComponent(tbl)}')">Abrir</button><button class="btn ghost" onclick="exportTableCsv('${encodeURIComponent(tbl)}')">Export CSV</button></div>`;
     block.appendChild(header);
     const rows = results[tbl];
@@ -1739,7 +1950,7 @@ function renderResults(q, results, per_table){
   // show priority tags
   try{
     (priorityTables || []).forEach(p => {
-      const el = document.getElementById('tag-'+p);
+      const el = document.getElementById(tableTagId(p));
       if(el) el.style.display = 'inline-block';
     });
   }catch(e){ /* ignored */ }
@@ -1756,7 +1967,15 @@ function renderResults(q, results, per_table){
   }
 
   /* utilities */
-function escapeHtml(s){ return (s+'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escapeHtml(s){
+  return (s+'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escapeAttr(s){
+  return escapeHtml(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function tableTagId(name){
+  return 'tag-' + encodeURIComponent(name);
+}
 function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function highlightText(text, tokens){
   if(!text) return '';
@@ -1814,7 +2033,36 @@ async function openTable(ev, tableEnc){
     alert('Erro ao abrir tabela');
   }
 }
-async function exportTableCsv(tableEnc){ const table = decodeURIComponent(tableEnc); const res = await fetch(`/api/table?name=${encodeURIComponent(table)}&limit=1000&offset=0`); const data = await res.json(); if(data.error){ alert('Erro ao exportar: ' + data.error); return; } const cols = data.columns; const rows = data.rows; const esc = v => '"' + String(v).replace(/"/g,'""') + '"'; const header = cols.map(esc).join(',') + '\n'; const body = rows.map(r => r.map(esc).join(',')).join('\n'); const blob = new Blob([header + body], {type:'text/csv;charset=utf-8;'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${table}.csv`; a.click(); URL.revokeObjectURL(url); }
+async function exportTableCsv(tableEnc){
+  const table = decodeURIComponent(tableEnc);
+  try{
+    const res = await fetch(`/api/table?name=${encodeURIComponent(table)}&limit=1000&offset=0`);
+    if(!res.ok){
+      alert('Erro ao exportar: http ' + res.status);
+      return;
+    }
+    const data = await res.json();
+    if(data.error){
+      alert('Erro ao exportar: ' + data.error);
+      return;
+    }
+    const cols = data.columns;
+    const rows = data.rows;
+    const esc = v => '"' + String(v).replace(/"/g,'""') + '"';
+    const header = cols.map(esc).join(',') + '\n';
+    const body = rows.map(r => r.map(esc).join(',')).join('\n');
+    const blob = new Blob([header + body], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${table}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }catch(e){
+    alert('Erro ao exportar: falha na requisicao');
+    logUi('ERROR', 'export csv falhou');
+  }
+}
 
 function exportResultsCsv(){
   if(!lastResults || !lastResults.results){

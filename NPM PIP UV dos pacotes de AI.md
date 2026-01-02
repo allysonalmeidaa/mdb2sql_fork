@@ -1,4 +1,4 @@
-### Guia de comandos para o Linux (Debian Trixie):
+### guia de comandos para o linux (debian trixie):
 
 | **Ferramenta** | **Comando npm**                            |
 | -------------- | ------------------------------------------ |

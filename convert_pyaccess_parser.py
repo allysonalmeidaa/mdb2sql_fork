@@ -28,6 +28,17 @@ from pathlib import Path
 from datetime import datetime, date
 import importlib
 
+LAST_ERROR = ""
+
+
+def _set_last_error(msg):
+    global LAST_ERROR
+    LAST_ERROR = msg or ""
+
+
+def get_last_error():
+    return LAST_ERROR
+
 
 def extract_date_from_filename(filename):
     patterns = [
@@ -139,7 +150,9 @@ def convert_mdb_to_duckdb(
     mdb_file = Path(mdb_path)
 
     if not mdb_file.exists():
-        print(f"Error: File not found: {mdb_path}")
+        err = f"File not found: {mdb_path}"
+        _set_last_error(err)
+        print(f"Error: {err}")
         return False
 
     print(f"\nProcessing: {mdb_file.name}")
@@ -153,13 +166,15 @@ def convert_mdb_to_duckdb(
         date_suffix = datetime.now().strftime("%Y%m%d")
 
     if ap is None:
-        print(
-            "Error: access_parser module not available. Please install access-parser."
-        )
+        err = "access_parser module not available. Please install access-parser."
+        _set_last_error(err)
+        print(f"Error: {err}")
         return False
 
     if duckdb is None:
-        print("Error: duckdb module not available. Please install duckdb.")
+        err = "duckdb module not available. Please install duckdb."
+        _set_last_error(err)
+        print(f"Error: {err}")
         return False
 
     conn = None
@@ -290,15 +305,6 @@ def convert_mdb_to_duckdb(
                 if batch_rows:
                     conn.executemany(insert_sql, batch_rows)
 
-        if create_fulltext:
-            try:
-                conn.execute(
-                    "CREATE TABLE IF NOT EXISTS _fulltext (table_name VARCHAR, pk_col VARCHAR, pk_value VARCHAR, row_offset BIGINT, content_norm TEXT, row_json TEXT)"
-                )
-            except Exception as e:
-                if not batch_mode:
-                    print(f"Warning: _fulltext creation failed: {e}")
-
                 conn.execute(
                     "INSERT INTO _metadata VALUES (?, ?, ?, ?, ?)",
                     [
@@ -322,10 +328,20 @@ def convert_mdb_to_duckdb(
                 # continue with next table
                 continue
 
+        if create_fulltext:
+            try:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS _fulltext (table_name VARCHAR, pk_col VARCHAR, pk_value VARCHAR, row_offset BIGINT, content_norm TEXT, row_json TEXT)"
+                )
+            except Exception as e:
+                if not batch_mode:
+                    print(f"Warning: _fulltext creation failed: {e}")
+
         # Close connection if open
         if conn is not None:
             conn.close()
 
+        _set_last_error("")
         print("\nSummary:")
         print(f"  Tables imported: {total_tables}")
         print(f"  Total rows: {total_rows}")
@@ -334,6 +350,7 @@ def convert_mdb_to_duckdb(
         return True
 
     except Exception as e:
+        _set_last_error(str(e))
         print(f"Error processing MDB file: {e}")
         traceback.print_exc()
         if conn is not None:

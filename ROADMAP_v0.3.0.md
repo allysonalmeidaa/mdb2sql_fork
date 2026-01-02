@@ -1,4 +1,4 @@
-# ROADMAP v0.3.0 - MDB to DuckDB Converter
+# roadmap v0.3.0 - mdb to duckdb converter
 
 Current version: v0.2.0
 Target version: v0.3.0
@@ -8,7 +8,7 @@ Status: Planning
 
 ---
 
-## Index
+## index
 - Overview
 - Objectives
 - Target Architecture
@@ -20,13 +20,13 @@ Status: Planning
 
 ---
 
-## Overview
+## overview
 - Current state: functional scripts to convert MDB/ACCDB to DuckDB, no automated tests or CI/CD.
 - v0.3.0 goal: modular architecture, automated tests, CI/CD, additional output options, and professional documentation.
 
 ---
 
-## Objectives
+## objectives
 - Quality: correct conversions, data integrity validation, prevent regressions with tests.
 - Professionalization: unified CLI, code standards, clear documentation, automated build/test.
 - Scalability: support DuckDB, SQLite, and PostgreSQL; enable new implementations easily.
@@ -34,7 +34,7 @@ Status: Planning
 
 ---
 
-## Target Architecture (high level)
+## target architecture (high level)
 - Package `mdb2sql` with modules: cli, config, utils, validators.
 - `converters/`: base.py, mdbtools.py, jackcess.py, pyaccess.py, pyodbc.py.
 - `outputs/`: base.py, duckdb.py, sqlite.py, postgres.py.
@@ -43,7 +43,7 @@ Status: Planning
 
 ---
 
-## Phases
+## phases
 1) Refactor and modularize (weeks 1-2)
 - Create base classes for converters and outputs.
 - Migrate existing scripts into the modular structure.
@@ -75,14 +75,14 @@ Status: Planning
 
 ---
 
-## Risks
+## risks
 - External dependencies (mdbtools, Java, ODBC) vary across platforms. Mitigation: document requirements and provide alternatives.
 - Time may be insufficient for full scope. Mitigation: prioritize tests, CI/CD, and CLI; defer non-critical items.
 - Performance with external databases. Mitigation: batch inserts and native load commands (e.g., COPY).
 
 ---
 
-## Deliverables
+## deliverables
 - Modular code with 4 converters and 3 outputs (DuckDB, SQLite, PostgreSQL).
 - Unified CLI with core commands.
 - Test suite with 80 percent coverage target.
@@ -91,7 +91,7 @@ Status: Planning
 
 ---
 
-## Acceptance Criteria
+## acceptance criteria
 - Conversion works via CLI for all converters.
 - Outputs for DuckDB, SQLite, and PostgreSQL validated by tests.
 - Test coverage >= 80 percent.
@@ -100,16 +100,16 @@ Status: Planning
 
 ---
 
-## Next Steps
+## next steps
 ```bash
-# Create working branch
+# create working branch
 git checkout -b develop
 
-# Initial folder structure
+# initial folder structure
 mkdir -p mdb2sql/{converters,outputs}
 mkdir -p tests/{unit/{converters,outputs},integration,performance,fixtures}
 mkdir -p .github/workflows docs docker scripts
 
-# Dev dependencies (example)
+# dev dependencies (example)
 pip install pytest pytest-cov flake8 mypy
 ```

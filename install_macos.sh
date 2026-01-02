@@ -20,6 +20,7 @@ source venv/bin/activate
 echo "Installing Python dependencies..."
 pip install --upgrade pip
 pip install -r requirements.txt
+python tools/check_dependencies.py
 
 echo "Downloading Jackcess JARs..."
 mkdir -p temp

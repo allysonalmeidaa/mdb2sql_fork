@@ -1,4 +1,4 @@
-#### Tabela de Comparação: Comandos do WSL vs. Systemd
+#### tabela de comparação: comandos do wsl vs. systemd
 
 Para facilitar a compreensão, aqui está uma tabela comparando os principais comandos e seus propósitos:
 

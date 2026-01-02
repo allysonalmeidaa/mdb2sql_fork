@@ -5,6 +5,7 @@ import duckdb
 import pypyodbc  # type: ignore[import-not-found]
 import re
 import sys
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
@@ -53,8 +54,21 @@ def get_mdb_tables(mdb_file: Path) -> List[str]:
 
     tables = []
     for row in cursor.tables():
-        if row.table_type == "TABLE":
-            tables.append(row.table_name)
+        table_type = None
+        table_name = None
+        try:
+            table_type = row.table_type
+            table_name = row.table_name
+        except Exception:
+            # pypyodbc may return tuples
+            try:
+                table_type = row[3]
+                table_name = row[2]
+            except Exception:
+                table_type = None
+                table_name = None
+        if table_type == "TABLE" and table_name:
+            tables.append(table_name)
 
     cursor.close()
     conn.close()
@@ -131,8 +145,8 @@ def import_to_duckdb(
     conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_import_id START 1")
 
     import_timestamp = datetime.now()
-    temp_dir = Path("/tmp/mdb2sql")
-    temp_dir.mkdir(exist_ok=True)
+    temp_dir = Path(tempfile.gettempdir()) / "mdb2sql"
+    temp_dir.mkdir(parents=True, exist_ok=True)
 
     for table in tables:
         print(f"  Importing: {table}...", end=" ", flush=True)

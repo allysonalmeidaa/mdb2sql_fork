@@ -19,11 +19,13 @@ import gzip
 import json
 import logging
 import os
+import platform
 import re
 import sys
 import threading
 import time
 import traceback
+import importlib
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,6 +59,9 @@ def _setup_event_logger():
 
 _EVENT_LOG = _setup_event_logger()
 _RECENT_LOGS = deque(maxlen=200)
+_DEPENDENCY_STATUS = {}
+_DEPENDENCY_CHECKED_AT = None
+_DEPENDENCY_CACHE_SECONDS = 300
 
 
 def _safe_ascii(value):
@@ -79,6 +84,78 @@ def log_event(message, level="info"):
             _EVENT_LOG.info(line)
     except Exception:
         pass
+
+
+def _module_check(name):
+    try:
+        importlib.import_module(name)
+        return {"ok": True, "error": ""}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _detect_dependencies():
+    global _DEPENDENCY_STATUS, _DEPENDENCY_CHECKED_AT
+    status = {
+        "python_version": sys.version.split()[0],
+        "python_bits": 64 if sys.maxsize > 2**32 else 32,
+        "platform": platform.platform(),
+        "modules": {},
+        "odbc_drivers": [],
+        "access_odbc_driver": False,
+        "access_odbc_driver_error": "",
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    status["modules"]["duckdb"] = _module_check("duckdb")
+    status["modules"]["pyodbc"] = _module_check("pyodbc")
+    status["modules"]["pypyodbc"] = _module_check("pypyodbc")
+    status["modules"]["access_parser"] = _module_check("access_parser")
+    status["modules"]["access_parser_access"] = _module_check("access_parser_access")
+
+    if pyodbc is not None:
+        try:
+            drivers = pyodbc.drivers()
+            status["odbc_drivers"] = drivers
+            status["access_odbc_driver"] = any(
+                "Access Driver" in name for name in drivers
+            )
+            if not status["access_odbc_driver"]:
+                status["access_odbc_driver_error"] = "Access ODBC driver not found"
+        except Exception as exc:
+            status["access_odbc_driver_error"] = str(exc)
+
+    log_event(
+        "event=deps_check "
+        f"python_bits={status['python_bits']} "
+        f"pyodbc={status['modules']['pyodbc'].get('ok')} "
+        f"pypyodbc={status['modules']['pypyodbc'].get('ok')} "
+        f"access_parser={status['modules']['access_parser'].get('ok')} "
+        f"access_odbc_driver={status['access_odbc_driver']}",
+        level="info",
+    )
+    missing = []
+    optional = {"access_parser_access"}
+    for key, info in status["modules"].items():
+        if not info.get("ok") and key not in optional:
+            missing.append(f"{key}:{info.get('error')}")
+    if missing:
+        log_event("event=deps_missing " + " | ".join(missing), level="warn")
+    if status["modules"]["pyodbc"].get("ok") and not status["access_odbc_driver"]:
+        log_event(
+            "event=odbc_driver_missing detail=Access ODBC driver not found",
+            level="warn",
+        )
+    _DEPENDENCY_STATUS = status
+    _DEPENDENCY_CHECKED_AT = time.time()
+    return status
+
+
+def get_dependency_status(refresh=False):
+    if refresh or _DEPENDENCY_CHECKED_AT is None:
+        return _detect_dependencies()
+    if time.time() - _DEPENDENCY_CHECKED_AT > _DEPENDENCY_CACHE_SECONDS:
+        return _detect_dependencies()
+    return _DEPENDENCY_STATUS
 
 
 # Optional modules
@@ -113,6 +190,9 @@ except Exception:
             return str(v)
         except Exception:
             return repr(v)
+
+
+get_dependency_status(refresh=True)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -545,6 +625,7 @@ def admin_status():
         "fulltext_count": 0,
         "top_tables": [],
     }
+    status["dependencies"] = get_dependency_status()
     status["indexer_available"] = create_or_resume_fulltext is not None
     if not status["indexer_available"]:
         status["indexer_error"] = create_fulltext_error or "create_fulltext missing"
@@ -597,6 +678,7 @@ def health_check():
             "status": "healthy",
             "current_db": db_path or "none",
             "timestamp": datetime.now().isoformat(),
+            "dependencies": get_dependency_status(),
             "cache_info": {
                 "tables_cached": len(_tables_cache),
                 "cache_age_seconds": int(cache_age),
@@ -992,6 +1074,11 @@ def admin_logs():
 def compress_response(response):
     """Comprime respostas JSON grandes com gzip"""
     if response.content_type == "application/json" and len(response.data) > 1000:
+        accept_encoding = request.headers.get("Accept-Encoding", "")
+        if "gzip" not in accept_encoding.lower():
+            return response
+        if response.headers.get("Content-Encoding"):
+            return response
         response.data = gzip.compress(response.data)
         response.headers["Content-Encoding"] = "gzip"
         response.headers["Vary"] = "Accept-Encoding"

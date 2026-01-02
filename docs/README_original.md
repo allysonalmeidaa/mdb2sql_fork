@@ -1,8 +1,8 @@
-# MDB to DuckDB Converter
+# mdb to duckdb converter
 
 Converts Microsoft Access database files (MDB/ACCDB) to DuckDB format.
 
-## Features
+## features
 
 - Extracts date from filename automatically
 - Preserves table structure
@@ -11,9 +11,9 @@ Converts Microsoft Access database files (MDB/ACCDB) to DuckDB format.
 - Batch processing support
 - Four implementation options
 
-## Implementation Options
+## implementation options
 
-### 1. convert_mdbtools.py (Recommended for Linux/Mac)
+### 1. convert_mdbtools.py (recommended for linux/mac)
 
 Uses mdbtools CLI utility.
 
@@ -29,14 +29,14 @@ Uses mdbtools CLI utility.
 
 **Installation:**
 ```bash
-# macOS
+# macos
 brew install mdbtools
 
-# Linux
+# linux
 sudo apt install mdbtools
 ```
 
-### 2. convert_jackcess.py (Recommended for reliability)
+### 2. convert_jackcess.py (recommended for reliability)
 
 Uses Jackcess Java library.
 
@@ -52,17 +52,17 @@ Uses Jackcess Java library.
 
 **Installation:**
 ```bash
-# Requires Java JDK
-# macOS
+# requires java jdk
+# macos
 brew install openjdk
 
-# Linux
+# linux
 sudo apt install default-jdk
 
-# JARs are downloaded automatically to temp/ folder
+# jars are downloaded automatically to temp/ folder
 ```
 
-### 3. convert_pyaccess_parser.py (Pure Python)
+### 3. convert_pyaccess_parser.py (pure python)
 
 Uses access-parser library (pure Python).
 
@@ -81,7 +81,7 @@ Uses access-parser library (pure Python).
 pip install access-parser
 ```
 
-### 4. convert_pyodbc.py (Windows only)
+### 4. convert_pyodbc.py (windows only)
 
 Uses pypyodbc with ODBC driver.
 
@@ -102,7 +102,7 @@ Uses pypyodbc with ODBC driver.
    pip install pypyodbc
    ```
 
-## Performance Comparison
+## performance comparison
 
 Based on benchmark tests with 5 files (~90MB each) on macOS:
 
@@ -118,57 +118,57 @@ Based on benchmark tests with 5 files (~90MB each) on macOS:
 - **Windows:** Use `convert_pyodbc.py` (native) or `convert_jackcess.py` (cross-platform)
 - **Maximum reliability:** Use `convert_jackcess.py` (works everywhere with Java)
 
-## Quick Start
+## quick start
 
 ```bash
-# Clone repository
+# clone repository
 git clone <repository-url>
 cd mdb2sql
 
-# Create virtual environment
+# create virtual environment
 python3 -m venv venv
 
-# Activate virtual environment
-# macOS/Linux:
+# activate virtual environment
+# macos/linux:
 source venv/bin/activate
-# Windows:
+# windows:
 venv\Scripts\activate
 
-# Install dependencies
+# install dependencies
 pip install -r requirements.txt
 
-# Install system dependencies (choose one)
+# install system dependencies (choose one)
 brew install mdbtools            # For convert_mdbtools.py
 brew install openjdk             # For convert_jackcess.py
-# Or install Access Engine        # For convert_pyodbc.py
+# or install access engine        # for convert_pyodbc.py
 ```
 
-## Usage
+## usage
 
-### Single File
+### single file
 
 ```bash
-# Using mdbtools
+# using mdbtools
 python convert_mdbtools.py --input file.mdb --output database.duckdb
 
-# Using Jackcess
+# using jackcess
 python convert_jackcess.py --input file.mdb --output database.duckdb
 
-# Using pyaccess_parser
+# using pyaccess_parser
 python convert_pyaccess_parser.py --input file.mdb --output database.duckdb
 
-# Using pypyodbc (Windows)
+# using pypyodbc (windows)
 python convert_pyodbc.py --input file.mdb --output database.duckdb
 ```
 
-### Batch Processing
+### batch processing
 
 ```bash
-# Process all MDB/ACCDB files in directory
+# process all mdb/accdb files in directory
 python convert_mdbtools.py --input import_folder --output database.duckdb --batch
 ```
 
-## File Naming Convention
+## file naming convention
 
 Files should contain date in one of these formats:
 - DD_MM_YYYY or DD-MM-YYYY
@@ -180,9 +180,9 @@ Examples:
 - DB3_04_09_2013.mdb -> 2013-09-04
 - database_20190801.accdb -> 2019-08-01
 
-## Database Structure
+## database structure
 
-### Tables
+### tables
 
 Each imported table is named: `{original_table_name}_{YYYYMMDD}`
 
@@ -190,7 +190,7 @@ Example:
 - Original: RANGER_SOACCU
 - Imported: RANGER_SOACCU_20130904
 
-### Metadata Table
+### metadata table
 
 ```sql
 CREATE TABLE _metadata (
@@ -203,7 +203,7 @@ CREATE TABLE _metadata (
 );
 ```
 
-### Query Examples
+### query examples
 
 ```sql
 -- View all imports
@@ -224,57 +224,57 @@ ORDER BY base_table, file_date;
 SELECT * FROM RANGER_SOACCU_20130904 LIMIT 10;
 ```
 
-## Platform-Specific Notes
+## platform-specific notes
 
-### macOS
+### macos
 - Use convert_mdbtools.py or convert_jackcess.py
 - mdbtools: `brew install mdbtools`
 - Java: `brew install openjdk`
 
-### Linux
+### linux
 - Use convert_mdbtools.py or convert_jackcess.py
 - mdbtools: `sudo apt install mdbtools`
 - Java: `sudo apt install default-jdk`
 
-### Windows
+### windows
 - Use convert_pyodbc.py (recommended)
 - Or use convert_jackcess.py with Java
 - Install Access Database Engine or ODBC
 
-## Troubleshooting
+## troubleshooting
 
 ### mdbtools encoding errors
 Files may have encoding issues. Try convert_jackcess.py instead.
 
-### Java not found
+### java not found
 ```bash
-# macOS
+# macos
 brew install openjdk
 export PATH="/usr/local/opt/openjdk/bin:$PATH"
 
-# Linux
+# linux
 sudo apt install default-jdk
 ```
 
-### ODBC driver not found
+### odbc driver not found
 - Windows: Install Access Database Engine
 - Linux/Mac: Install mdbtools ODBC driver or use different method
 
-## Development
+## development
 
 ```bash
-# Run tests
+# run tests
 python -m pytest tests/
 
-# Check code
+# check code
 python -m pylint convert*.py
 ```
 
-## License
+## license
 
 MIT
 
-## Version History
+## version history
 
 - v0.1.0-mdbtools: Initial release with mdbtools
 - v0.2.0: Added Jackcess, pyaccess_parser, and pypyodbc implementations

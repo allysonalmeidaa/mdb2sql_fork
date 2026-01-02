@@ -377,7 +377,7 @@ def convert_access_to_duckdb(
 
     def try_pyaccess_parser():
         try:
-            from convert_pyaccess_parser import convert_mdb_to_duckdb
+            from convert_pyaccess_parser import convert_mdb_to_duckdb, get_last_error
         except Exception as e:
             return False, f"pyaccess_parser not available: {e}"
         _report(
@@ -388,9 +388,7 @@ def convert_access_to_duckdb(
             msg="starting_pyaccess_parser",
         )
         _ensure_clean_duckdb(duckdb_path)
-        ok = bool(
-            convert_mdb_to_duckdb(access_path, duckdb_path, batch_mode=True)
-        )
+        ok = bool(convert_mdb_to_duckdb(access_path, duckdb_path, batch_mode=True))
         if ok:
             _report(
                 total_tables=0,
@@ -400,7 +398,8 @@ def convert_access_to_duckdb(
                 msg="converted",
             )
             return True, "converted via pyaccess_parser"
-        return False, "pyaccess_parser failed"
+        err = get_last_error() or "pyaccess_parser failed"
+        return False, err
 
     conversion_mode = _normalize_mode(conversion_mode)
     use_odbc = bool(odbc_enabled) and conversion_mode != "pure_only"

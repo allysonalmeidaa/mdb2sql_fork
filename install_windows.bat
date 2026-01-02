@@ -8,6 +8,7 @@ python -m venv venv
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+python tools\check_dependencies.py
 
 echo.
 echo Downloading Jackcess JARs...
@@ -22,6 +23,7 @@ echo.
 echo For ODBC support (convert_pyodbc.py):
 echo   Download and install Microsoft Access Database Engine:
 echo   https://www.microsoft.com/en-us/download/details.aspx?id=54920
+echo   The Python interpreter must match the driver bitness (64-bit recommended).
 echo.
 echo For Jackcess support (convert_jackcess.py):
 echo   Install Java JDK from https://adoptium.net/

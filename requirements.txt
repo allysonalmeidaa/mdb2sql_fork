@@ -1,6 +1,7 @@
 duckdb
 flask
 rapidfuzz
+pylama
 pyodbc
 pypyodbc
 pandas
@@ -8,3 +9,4 @@ numpy
 matplotlib
 plotly
 access-parser
+setuptools<81

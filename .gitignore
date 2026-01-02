@@ -40,6 +40,9 @@ venv.bak/
 *.swo
 *~
 .DS_Store
+node_modules/
+.claude/
+test-results/
 
 logs/
 *.log

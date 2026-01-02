@@ -149,6 +149,11 @@
     .flow-hint.info { background: rgba(43, 92, 255, 0.12); border-color: rgba(43, 92, 255, 0.4); color: #dbe6ff; }
     .flow-hint.warn { background: rgba(255, 196, 77, 0.12); border-color: rgba(255, 196, 77, 0.4); color: #ffe4b3; }
     .flow-hint.error { background: rgba(215, 90, 74, 0.18); border-color: rgba(215, 90, 74, 0.5); color: #ffd3cc; }
+    .modal-banner { padding: 10px 12px; border-radius: 12px; margin-bottom: 12px; font-weight: 600; }
+    .modal-banner.info { background: rgba(43, 92, 255, 0.12); border: 1px solid rgba(43, 92, 255, 0.4); color: #dbe6ff; }
+    .modal-banner.warn { background: rgba(255, 196, 77, 0.12); border: 1px solid rgba(255, 196, 77, 0.4); color: #ffe4b3; }
+    .modal-banner.error { background: rgba(215, 90, 74, 0.18); border: 1px solid rgba(215, 90, 74, 0.5); color: #ffd3cc; }
+    .modal-subtle { font-size: 12px; color: var(--muted); margin-top: 4px; }
     .controls-disabled { opacity: 0.5; pointer-events: none; }
     .status-deck {
       display: grid;
@@ -182,7 +187,7 @@
     .step.active { border-style: solid; border-color: rgba(255, 196, 77, 0.6); background: rgba(255, 196, 77, 0.12); }
     .step.warn { border-style: solid; border-color: rgba(215, 90, 74, 0.5); background: rgba(215, 90, 74, 0.12); }
     ul.table-list { list-style: none; padding: 0; margin: 0; }
-    li.table-item { padding: 8px; border-bottom: 1px solid #efede7; display: flex; justify-content: space-between; align-items: center; }
+    li.table-item { padding: 8px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
     .db-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
     .db-tab {
       border: 1px solid var(--border);
@@ -221,7 +226,7 @@
     .progress-wrapper { background: #1c222b; border-radius: 10px; padding: 8px; margin-top: 8px; }
     .progress-bar { height: 12px; background: linear-gradient(90deg, #1f4ed8, #3e7bff); border-radius: 999px; width: 0%; }
     table.results { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
-    table.results th, table.results td { border: 1px solid #efece6; padding: 8px; text-align: left; vertical-align: top; }
+    table.results th, table.results td { border: 1px solid var(--border); padding: 8px; text-align: left; vertical-align: top; }
     mark { background: rgba(62, 123, 255, 0.35); padding: 0 2px; border-radius: 3px; color: #e9efff; }
     .tabs { display: flex; gap: 8px; margin: 10px 0 12px 0; flex-wrap: wrap; }
     .tab-btn {
@@ -244,13 +249,13 @@
     body.flow-access .flow-duckdb-only { display: none; }
     .upload-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
     .upload-row.selected { background: rgba(43, 92, 255, 0.12); border-left: 3px solid #3e7bff; padding-left: 8px; }
-    .file-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid #efece6; }
+    .file-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
     .file-row:last-child { border-bottom: none; }
     .file-row.selected { background: rgba(43, 92, 255, 0.12); border-left: 3px solid #3e7bff; padding-left: 8px; }
     .file-name { font-weight: 600; }
     .file-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
     .file-status { font-size: 11px; color: var(--muted); margin-top: 2px; }
-    .file-badge { background: #f0ece3; color: #223; border-radius: 999px; padding: 2px 6px; font-size: 11px; margin-left: 6px; }
+    .file-badge { background: var(--bg-accent); color: var(--ink); border-radius: 999px; padding: 2px 6px; font-size: 11px; margin-left: 6px; }
     .file-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     a { color: #9bb3ff; }
     a:hover { color: #c2d1ff; }
@@ -271,9 +276,9 @@
     }
     .modal-header h3 { margin: 0; }
     .btn.small { padding: 4px 10px; font-size: 12px; }
-    .flow-status { background: #f0ece3; border: 1px solid var(--border); padding: 8px 10px; border-radius: 10px; margin-bottom: 10px; }
+    .flow-status { background: var(--bg-accent); border: 1px solid var(--border); padding: 8px 10px; border-radius: 10px; margin-bottom: 10px; }
     details.advanced { margin-top: 8px; }
-    details.advanced > summary { cursor: pointer; font-weight: 600; color: #223; }
+    details.advanced > summary { cursor: pointer; font-weight: 600; color: var(--ink); }
     .advanced-body { margin-top: 8px; }
     #filesPanel[hidden] { display: none; }
     @media (max-width: 980px) {
@@ -350,10 +355,10 @@
         <div class="card flow-steps" id="flowSteps" style="--stagger:4">
           <div class="steps-title">Fluxo atual</div>
           <div class="steps-grid">
-            <div class="step" id="stepSelect">1. Selecionar DB</div>
-            <div class="step" id="stepConvert">2. Converter ou validar</div>
+            <div class="step" id="stepSelect">1. Selecionar DB <button id="openSelectInline" class="btn ghost small" type="button">Abrir</button></div>
+            <div class="step" id="stepConvert">2. Converter ou validar <button id="openConvertInline" class="btn ghost small" type="button">Detalhes</button></div>
             <div class="step" id="stepIndex">3. Indexar _fulltext <button id="openIndexInline" class="btn ghost small" type="button">Abrir</button></div>
-            <div class="step" id="stepSearch">4. Buscar resultados</div>
+            <div class="step" id="stepSearch">4. Buscar resultados <button id="openSearchInline" class="btn ghost small" type="button">Ir</button></div>
           </div>
         </div>
         <div id="selectedMainInfo" class="muted" style="margin-bottom:8px"></div>
@@ -375,52 +380,8 @@
           <div id="filesHelpText" class="small" style="margin-bottom:8px"></div>
           <div id="filesList" class="muted">Carregando...</div>
         </div>
-        <div class="search-row">
-          <input id="q" type="text" placeholder="Digite termo (ex: svp) - Enter para pesquisar" style="flex:1" />
-          <button id="searchBtn" class="btn">Pesquisar</button>
-          <button id="exportAllBtn" class="btn" style="background:#2f9e44;" disabled>Exportar resultados CSV</button>
-        </div>
-
-        <details id="advancedPanel" class="advanced">
-          <summary>Opcoes avancadas</summary>
-          <div class="advanced-body">
-            <div class="controls small">
-              <label title="Maximo de resultados por tabela">
-                por tabela:
-                <input id="per_table" type="number" value="10" style="width:80px" />
-              </label>
-              <label title="Total de candidatos lidos do _fulltext">
-                candidatos SQL:
-                <input id="candidate_limit" type="number" value="1000" style="width:110px" />
-              </label>
-              <label title="Total maximo de linhas retornadas">
-                total_max:
-                <input id="total_limit" type="number" value="500" style="width:80px" />
-              </label>
-              <label title="Qualquer token ou todos os tokens">
-                modo tokens:
-                <select id="token_mode"><option value="any">qualquer</option><option value="all">todas</option></select>
-              </label>
-              <label style="display:flex;align-items:center;gap:4px;" title="Restringe a busca para tabelas escolhidas">
-                <span>tabelas (filtro opcional):</span>
-                <select id="tablesFilter" multiple size="3" style="min-width:160px;max-width:220px;"></select>
-                <button type="button" id="clearTablesFilter" class="btn ghost small">Limpar</button>
-              </label>
-              <label style="display:flex;align-items:center;gap:8px;" title="Pontuacao minima para exibir resultados">
-                min_score:
-                <input id="min_score" type="range" min="40" max="100" value="70" />
-                <span id="minScoreVal" class="small">70</span>
-              </label>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
-              <button id="resetAdvanced" class="btn ghost small" type="button" title="Restaurar valores padrao">Restaurar padrao</button>
-              <div id="advancedMsg" class="muted"></div>
-            </div>
-          </div>
-        </details>
-
-      <div id="searchMeta" class="muted">Digite um termo e clique em Pesquisar.</div>
-      <div id="uiLog" class="muted" style="margin-top:6px;white-space:pre-wrap"></div>
+        <div class="flow-hint info">Busca em modal: use o passo 4 ou o botao "Ir" para abrir a pesquisa.</div>
+      <div id="uiLog" class="muted" style="margin-top:6px;white-space:pre-wrap;display:none"></div>
     </div>
 
       <div id="resultsArea"></div>
@@ -432,6 +393,20 @@
     <div class="modal-header">
       <h3>Selecao de DB</h3>
       <button id="closeConfig" class="btn ghost small" title="Fechar">Fechar</button>
+    </div>
+    <div id="convModalBanner" class="modal-banner info" style="display:none"></div>
+    <div class="flow-access-only" style="margin-bottom:8px">
+      <div class="small" style="font-weight:600">Conversao (progresso)</div>
+      <div class="progress-wrapper">
+        <div style="display:flex;justify-content:space-between">
+          <div id="convStatusText" class="muted">Nenhuma conversao em andamento</div>
+          <div id="convPercentText" class="muted">0%</div>
+        </div>
+        <div style="margin-top:6px;background:#e9eef8;border-radius:6px;overflow:hidden">
+          <div id="convBar" class="progress-bar" style="width:0%"></div>
+        </div>
+        <div id="convTopHint" class="modal-subtle"></div>
+      </div>
     </div>
     <div style="margin-bottom:6px">DB atual: <span id="cfgCurrentDb" class="muted">carregando...</span></div>
     <div id="selectedFileInfo" class="muted" style="margin-bottom:8px"></div>
@@ -460,14 +435,6 @@
     <div style="margin-top:8px"><strong>Ou selecione um DB ja enviado:</strong></div>
     <div id="uploadsList" class="muted" style="margin-top:8px"></div>
 
-    <hr/>
-    <div class="flow-access-only"><strong>Conversao (progresso)</strong>
-      <div class="progress-wrapper">
-        <div style="display:flex;justify-content:space-between"><div id="convStatusText" class="muted">Nenhuma conversao em andamento</div><div id="convPercentText" class="muted">0%</div></div>
-        <div style="margin-top:6px;background:#e9eef8;border-radius:6px;overflow:hidden"><div id="convBar" class="progress-bar" style="width:0%"></div></div>
-      </div>
-    </div>
-
     <div class="flow-access-only" style="margin-top:8px">
       <label class="muted"><input id="autoIndexToggle" type="checkbox" /> Auto indexacao apos conversao (Access)</label>
       <span id="autoIndexMsg" class="muted" style="margin-left:8px"></span>
@@ -484,14 +451,14 @@
     <div style="display:flex;gap:12px">
       <div style="flex:1">
         <div style="font-weight:600;margin-bottom:6px">Todas as tabelas</div>
-        <ul id="allTablesList" style="border:1px solid #eef2f6;padding:8px;max-height:220px;overflow:auto"></ul>
+        <ul id="allTablesList" style="border:1px solid var(--border);padding:8px;max-height:220px;overflow:auto"></ul>
       </div>
       <div style="flex:1">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <div style="font-weight:600">Tabelas prioritarias (selecionadas)</div>
           <div class="small">Arraste para reordenar</div>
         </div>
-        <ul id="priorityListModal" style="border:1px solid #eef2f6;padding:8px;max-height:220px;overflow:auto"></ul>
+        <ul id="priorityListModal" style="border:1px solid var(--border);padding:8px;max-height:220px;overflow:auto"></ul>
       </div>
     </div>
 
@@ -507,6 +474,7 @@
       <h3>Indice _fulltext</h3>
       <button id="closeIndex" class="btn ghost small" title="Fechar">Fechar</button>
     </div>
+    <div id="indexModalBanner" class="modal-banner info" style="display:none"></div>
     <div class="small" style="margin:4px 0 10px 0">
       No modo DuckDB, a busca usa _fulltext e sem ele nao funciona. O indice acelera a busca.
       Para Access convertido, o fluxo tambem depende do _fulltext.
@@ -554,6 +522,57 @@
       <div style="font-weight:600;margin-bottom:6px">Logs recentes</div>
       <div id="statusLogList" class="muted" style="white-space:pre-wrap"></div>
     </div>
+  </div>
+
+  <div class="config-modal" id="searchModal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-header">
+      <h3>Buscar resultados</h3>
+      <button id="closeSearch" class="btn ghost small" title="Fechar">Fechar</button>
+    </div>
+    <div class="search-row">
+      <input id="q" type="text" placeholder="Digite termo (ex: svp) - Enter para pesquisar" style="flex:1" />
+      <button id="searchBtn" class="btn">Pesquisar</button>
+      <button id="exportAllBtn" class="btn" style="background:#2f9e44;" disabled>Exportar resultados CSV</button>
+    </div>
+    <div id="searchMeta" class="muted" style="margin-bottom:10px">Digite um termo e clique em Pesquisar.</div>
+
+    <details id="advancedPanel" class="advanced">
+      <summary>Opcoes avancadas</summary>
+      <div class="advanced-body">
+        <div class="controls small">
+          <label title="Maximo de resultados por tabela">
+            por tabela:
+            <input id="per_table" type="number" value="10" style="width:80px" />
+          </label>
+          <label title="Total de candidatos lidos do _fulltext">
+            candidatos SQL:
+            <input id="candidate_limit" type="number" value="1000" style="width:110px" />
+          </label>
+          <label title="Total maximo de linhas retornadas">
+            total_max:
+            <input id="total_limit" type="number" value="500" style="width:80px" />
+          </label>
+          <label title="Qualquer token ou todos os tokens">
+            modo tokens:
+            <select id="token_mode"><option value="any">qualquer</option><option value="all">todas</option></select>
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;" title="Restringe a busca para tabelas escolhidas">
+            <span>tabelas (filtro opcional):</span>
+            <select id="tablesFilter" multiple size="3" style="min-width:160px;max-width:220px;"></select>
+            <button type="button" id="clearTablesFilter" class="btn ghost small">Limpar</button>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;" title="Pontuacao minima para exibir resultados">
+            min_score:
+            <input id="min_score" type="range" min="40" max="100" value="70" />
+            <span id="minScoreVal" class="small">70</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+          <button id="resetAdvanced" class="btn ghost small" type="button" title="Restaurar valores padrao">Restaurar padrao</button>
+          <div id="advancedMsg" class="muted"></div>
+        </div>
+      </div>
+    </details>
   </div>
 
   <script src="/ui_utils.js"></script>

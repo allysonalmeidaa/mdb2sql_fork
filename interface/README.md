@@ -1,8 +1,8 @@
-# Interface — Visão Geral e Relações
+# interface — visao geral e relacoes
 
 Este diretório contém o backend Flask e utilitários para busca local em bases DuckDB (com fallback opcional para Access via ODBC) e a construção do índice `_fulltext`.
 
-## Componentes
+## componentes
 
 - `app_flask_search.py`: Backend Flask simples.
   - Endpoints: `/` (serve `static/index.html`), `/api/tables`, `/api/table`, `/api/search`.
@@ -35,7 +35,7 @@ Este diretório contém o backend Flask e utilitários para busca local em bases
   - `normalize_text(s)`: remove acentos, lowercase, normaliza pontuação/underscores/hífens e colapsa espaços.
   - `serialize_value(v)`: converte tipos (datas, decimals, bytes etc.) para valores JSON-compatíveis.
 
-## Relações entre arquivos
+## relacoes entre arquivos
 
 - UI (`static/index.html`) → chama endpoints do `app_flask_local_search.py`:
   - Estado inicial: `/admin/list_uploads`.
@@ -52,7 +52,7 @@ Este diretório contém o backend Flask e utilitários para busca local em bases
 
 - `app_flask_search.py` é independente de `_fulltext` e de `utils.py` (usa ILIKE direto). Serve `static/index.html` como o completo, mas com menos recursos.
 
-## Quando precisam estar juntos?
+## quando precisam estar juntos
 
 - Para a app completa (uploads, conversão, indexação `_fulltext`, prioridade):
   - Necessários: `app_flask_local_search.py`, `create_fulltext.py`, `utils.py` e `static/index.html` (fora deste diretório).
@@ -63,13 +63,14 @@ Este diretório contém o backend Flask e utilitários para busca local em bases
 - Para a versão simples:
   - Basta `app_flask_search.py` e `static/index.html`, com `minha.duckdb` disponível.
 
-## Dependências
+## dependencias
 
-- Obrigatórias (app completa DuckDB): `flask`, `duckdb`, `rapidfuzz`.
-- Opcionais: `pyodbc` (fallback Access), `pandas` (se for usar scripts auxiliares), `matplotlib` (gráficos em ferramentas).
-- Sistema (para Access): driver ODBC Microsoft Access (Windows) ou configuração equivalente.
+- Obrigatórias: `flask`, `duckdb`, `rapidfuzz`, `pyodbc`, `pandas`, `matplotlib`.
+- Sistema (Windows): driver ODBC Microsoft Access (Access Database Engine 2016/2019).
+- O backend executa verificação de dependências e registra no log. O status aparece em `/admin/status` e `/api/health`.
+- Script local de verificação: `python tools/check_dependencies.py`.
 
-## Como rodar
+## como rodar
 
 - Versao simples:
 PowerShell:
@@ -103,7 +104,7 @@ Acesse `http://127.0.0.1:5000/`.
 
 Selecione um DB em "Configurar/Upload"; para `.duckdb`, a busca usa `_fulltext` quando disponível. Para `.mdb/.accdb`, se `pyodbc` estiver instalado, o fallback faz a busca direta.
 
-## Observações
+## observacoes
 
 - Após converter Access→DuckDB, a indexação automática pode ser acionada (se `auto_index_after_convert` estiver habilitado).
 - A prioridade de tabelas influencia a ordem de exibição dos resultados.

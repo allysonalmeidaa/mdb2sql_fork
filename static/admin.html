@@ -204,10 +204,10 @@ function scheduleStatusPoll(){
 }
 
 /* Initial load */
-async function refreshAll(){
+async function refreshAll(opts){
   await refreshUploads();
   await refreshStatus();
-  await loadPriorityTables();
+  await loadPriorityTables(opts);
 }
 
 /* Upload form */
@@ -273,28 +273,35 @@ async function selectUpload(nameEnc){
 }
 
 /* Load priority list (tables) and render draggable list */
-async function loadPriorityTables(){
+async function loadPriorityTables(opts){
   const listEl = document.getElementById('priorityList');
   const msg = document.getElementById('priorityMsg');
   listEl.innerHTML = '';
-  msg.textContent = 'Carregando...';
+  const keepMsg = opts && opts.keepPriorityMsg;
+  if(!keepMsg){
+    msg.textContent = 'Carregando...';
+  }
   if(!window.__currentDb){
     listEl.innerHTML = '<li class="muted">Selecione um DB para listar tabelas.</li>';
-    msg.textContent = '';
+    if(!keepMsg){
+      msg.textContent = '';
+    }
     return;
   }
   try{
     const t = await apiJSON('/api/tables');
     if(t.error){
       listEl.innerHTML = '<li class="muted">Erro ao carregar tabelas</li>';
-      msg.textContent = '';
+      msg.textContent = 'Erro ao carregar tabelas';
       logUi('ERROR', 'priority tabelas ' + t.error);
       return;
     }
     const tables = t.tables || [];
     if(!tables.length){
       listEl.innerHTML = '<li class="muted">Nenhuma tabela encontrada no DB atual.</li>';
-      msg.textContent = '';
+      if(!keepMsg){
+        msg.textContent = '';
+      }
       return;
     }
     // get saved priority from /admin/list_uploads (endpoint returns priority_tables)
@@ -318,11 +325,13 @@ async function loadPriorityTables(){
         </div>`;
       listEl.appendChild(li);
     });
-    msg.textContent = '';
+    if(!keepMsg){
+      msg.textContent = '';
+    }
     enableDragAndDrop(listEl);
   }catch(e){
     listEl.innerHTML = '<li class="muted">Erro ao carregar tabelas</li>';
-    msg.textContent = '';
+    msg.textContent = 'Erro ao carregar tabelas';
     logUi('ERROR', 'priority tabelas falhou');
   }
 }
@@ -371,9 +380,10 @@ document.getElementById('savePriorityBtn').addEventListener('click', async ()=>{
   const tables = Array.from(listEl.querySelectorAll('li')).map(li => li.dataset.table);
   const res = await fetch('/admin/set_priority', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({tables: tables}) });
   const j = await res.json();
-  document.getElementById('priorityMsg').textContent = JSON.stringify(j);
+  const msg = document.getElementById('priorityMsg');
+  msg.textContent = (j && j.ok) ? 'ok' : 'erro ao salvar';
   // update displayed priority from server to be consistent
-  await refreshAll();
+  await refreshAll({keepPriorityMsg: true});
 });
 
 /* Start index button */

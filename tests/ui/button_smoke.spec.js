@@ -223,6 +223,12 @@ async function closeStatus(page) {
   await ensureOverlayClosed(page);
 }
 
+async function closePriorityModal(page) {
+  await page.locator("#closePriority").click();
+  await expect(page.locator("#priorityModal")).toBeHidden();
+  await ensureOverlayClosed(page);
+}
+
 async function selectDbFromConfig(page, fileName) {
   await openConfig(page);
   const row = page.locator("#uploadsList .upload-row", { hasText: fileName });
@@ -273,10 +279,201 @@ test("status modal opens", async ({ page }) => {
   await page.goto("/");
   await page.locator("#openStatus").click();
   await expect(page.locator("#statusModal")).toBeVisible();
+  await expect(page.locator("#statusModal")).toContainText("Alertas e logs");
   await expect(page.locator("#statusCriticalList")).toBeVisible();
   await expect(page.locator("#statusWarnList")).toBeVisible();
   await expect(page.locator("#statusInfoList")).toBeVisible();
   await closeStatus(page);
+});
+
+test("status alerts badge opens modal", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#statusAlerts").click();
+  await expect(page.locator("#statusModal")).toBeVisible();
+  await closeStatus(page);
+});
+
+test("conversion error banner shows in status and alerts", async ({ page }) => {
+  await page.route("**/admin/list_uploads", route => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        current_db: "sample.accdb",
+        uploads: [{ name: "sample.accdb" }],
+        priority_tables: []
+      })
+    });
+  });
+  await page.route("**/admin/status", route => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        db: "sample.accdb",
+        fulltext_count: 0,
+        conversion: { running: false, ok: false, msg: "All methods failed" }
+      })
+    });
+  });
+  await page.route("**/admin/logs", route => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, logs: [] })
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.locator("#flowBanner")).toContainText(/Access|Convers/);
+  await expect(page.locator("#statusAlerts")).toContainText(/Conversao/i);
+});
+
+test("missing fulltext shows banner in duckdb flow", async ({ page }) => {
+  await page.route("**/admin/list_uploads", route => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        current_db: "sample.duckdb",
+        uploads: [{ name: "sample.duckdb" }],
+        priority_tables: []
+      })
+    });
+  });
+  await page.route("**/admin/status", route => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        db: "sample.duckdb",
+        fulltext_count: 0,
+        conversion: { running: false, ok: true, msg: "ok" }
+      })
+    });
+  });
+  await page.route("**/admin/logs", route => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, logs: [] })
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.locator("#flowBanner")).toContainText(/_fulltext/i);
+});
+
+test("modal overlay closes config modal", async ({ page }) => {
+  await page.goto("/");
+  await openConfig(page);
+  await page.locator("#overlay").click({ force: true, position: { x: 5, y: 5 } });
+  await expect(page.locator("#configModal")).toBeHidden();
+});
+
+test("status modal closes via overlay", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#openStatus").click();
+  await expect(page.locator("#statusModal")).toBeVisible();
+  await page.locator("#overlay").click({ force: true, position: { x: 5, y: 5 } });
+  await expect(page.locator("#statusModal")).toBeHidden();
+});
+
+test("priority modal opens and closes", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#openPriority").click();
+  await expect(page.locator("#priorityModal")).toBeVisible();
+  await expect(page.locator("#priorityModal")).toContainText("Priorizar tabelas");
+  await closePriorityModal(page);
+});
+
+test("index modal opens and closes", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#openIndex").click();
+  await expect(page.locator("#indexModal")).toBeVisible();
+  await expect(page.locator("#indexModal")).toContainText("Indice _fulltext");
+  await closeIndex(page);
+});
+
+test("search modal opens and shows controls", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#openSearchInline").click();
+  await expect(page.locator("#searchModal")).toBeVisible();
+  await expect(page.locator("#searchModal")).toContainText("Buscar resultados");
+  await expect(page.locator("#q")).toBeVisible();
+  await expect(page.locator("#searchBtn")).toBeVisible();
+  await expect(page.locator("#advancedPanel")).toBeVisible();
+  await page.locator("#closeSearch").click();
+  await expect(page.locator("#searchModal")).toBeHidden();
+});
+
+test("opening a new modal closes the previous", async ({ page }) => {
+  await page.goto("/");
+  await openConfig(page);
+  await expect(page.locator("#configModal")).toBeVisible();
+  await page.evaluate(() => {
+    const btn = document.getElementById("openStatus");
+    if (btn) btn.click();
+  });
+  await expect(page.locator("#statusModal")).toBeVisible();
+  await expect(page.locator("#configModal")).toBeHidden();
+  await closeStatus(page);
+});
+
+test("flow steps buttons open actions", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#openSelectInline").click();
+  await expect(page.locator("#configModal")).toBeVisible();
+  await closeConfig(page);
+
+  await page.locator("#openConvertInline").click();
+  await expect(page.locator("#statusModal")).toBeVisible();
+  await closeStatus(page);
+
+  await page.locator("#openIndexInline").click();
+  await expect(page.locator("#indexModal")).toBeVisible();
+  await closeIndex(page);
+
+  await page.locator("#openSearchInline").click();
+  await expect(page.locator("#searchModal")).toBeVisible();
+  await page.locator("#closeSearch").click();
+  await expect(page.locator("#searchModal")).toBeHidden();
+});
+
+test("files panel toggle shows and hides", async ({ page }) => {
+  await page.goto("/");
+  const panel = page.locator("#filesPanel");
+  await expect(panel).toBeHidden();
+  await page.locator("#openFilesBtn").click();
+  await expect(panel).toBeVisible();
+  await page.locator("#closeFilesBtn").click();
+  await expect(panel).toBeHidden();
+});
+
+test("db tabs switch selection", async ({ page, request }, testInfo) => {
+  const fileA = `${TEST_PREFIX}tab_a.duckdb`;
+  const fileB = `${TEST_PREFIX}tab_b.duckdb`;
+  const pathA = testInfo.outputPath(fileA);
+  const pathB = testInfo.outputPath(fileB);
+  createDuckdbFile(pathA);
+  createDuckdbFile(pathB);
+
+  await uploadFile(request, fileA, pathA);
+  await uploadFile(request, fileB, pathB);
+
+  await page.goto("/");
+  await page.locator("#refreshBtn").click();
+
+  const tabA = page.locator("#dbTabs .db-tab", { hasText: fileA });
+  const tabB = page.locator("#dbTabs .db-tab", { hasText: fileB });
+  await expect(tabA).toBeVisible();
+  await expect(tabB).toBeVisible();
+
+  await tabA.click();
+  await expect(page.locator("#currentDb")).toContainText(fileA);
+
+  await tabB.click();
+  await expect(page.locator("#currentDb")).toContainText(fileB);
 });
 
 test("flow guard blocks wrong file extensions", async ({ page }, testInfo) => {
@@ -427,6 +624,22 @@ test("delete file from config list", async ({ page, request }, testInfo) => {
   await closeConfig(page);
 });
 
+test("delete file from files panel", async ({ page, request }, testInfo) => {
+  const name = `${TEST_PREFIX}panel_delete.duckdb`;
+  const filePath = testInfo.outputPath(name);
+  createDuckdbFile(filePath);
+
+  await uploadFile(request, name, filePath);
+
+  await page.goto("/");
+  await openFilesPanel(page);
+  const row = page.locator("#filesList .file-row", { hasText: name });
+  await expect(row).toBeVisible();
+
+  page.once("dialog", dialog => dialog.accept());
+  await row.locator("button", { hasText: "Excluir" }).click();
+  await expect(page.locator("#filesList .file-row", { hasText: name })).toHaveCount(0);
+});
 test("priority modal shows no db message", async ({ page }) => {
   await page.goto("/");
   await page.locator("#openPriority").click();
@@ -479,6 +692,8 @@ test("index modal disabled with no db", async ({ page }) => {
 
 test("search without db shows alert", async ({ page }) => {
   await page.goto("/");
+  await page.locator("#openSearchInline").click();
+  await expect(page.locator("#searchModal")).toBeVisible();
   await expect(page.locator("#q")).toBeDisabled();
   await expect(page.locator("#searchBtn")).toBeDisabled();
   await expect(page.locator("#flowBanner")).toContainText("Selecione um arquivo");
@@ -556,6 +771,8 @@ test("advanced reset restores defaults", async ({ page, request }, testInfo) => 
 
   await page.goto("/");
   await selectDbFromConfig(page, name);
+  await page.locator("#openSearchInline").click();
+  await expect(page.locator("#searchModal")).toBeVisible();
   await page.locator("#advancedPanel").click();
 
   await page.locator("#per_table").fill("5");
@@ -633,6 +850,8 @@ test("duckdb ui upload and main buttons", async ({ page, request }, testInfo) =>
   await expect(page.locator("#priorityMsg")).toContainText("Prioridades salvas");
   await closePriority(page);
 
+  await page.locator("#openSearchInline").click();
+  await expect(page.locator("#searchModal")).toBeVisible();
   await page.locator("#q").fill("alpha");
   await page.locator("#searchBtn").click();
   await expect(page.locator("#searchMeta")).toContainText("Resultados");
@@ -642,6 +861,10 @@ test("duckdb ui upload and main buttons", async ({ page, request }, testInfo) =>
   await page.locator("#exportAllBtn").click();
   await downloadAll;
 
+  await page.locator("#closeSearch").click();
+  await expect(page.locator("#searchModal")).toBeHidden();
+  await ensureOverlayClosed(page);
+
   const downloadTable = page.waitForEvent("download");
   await page.locator("button", { hasText: "Export CSV" }).first().click();
   await downloadTable;
@@ -649,6 +872,23 @@ test("duckdb ui upload and main buttons", async ({ page, request }, testInfo) =>
 
 test("access ui upload via config", async ({ page }, testInfo) => {
   const name = `${TEST_PREFIX}access_flow.accdb`;
+  const filePath = testInfo.outputPath(name);
+  writeDummyFile(filePath);
+
+  await page.goto("/");
+  await openConfig(page);
+  await page.locator('#flowTabs .tab-btn[data-flow="access"]').click();
+  await page.locator("#fileInput").setInputFiles(filePath);
+  await page.locator("#uploadBtn").click();
+
+  const msg = page.locator("#uploadMsg");
+  await expect(msg).toContainText(/Convers|Erro|Falha/i);
+  await expect(page.locator("#uploadsList .upload-row", { hasText: name })).toBeVisible();
+  await closeConfig(page);
+});
+
+test("access mdb upload via config", async ({ page }, testInfo) => {
+  const name = `${TEST_PREFIX}access_flow.mdb`;
   const filePath = testInfo.outputPath(name);
   writeDummyFile(filePath);
 
